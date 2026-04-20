@@ -209,47 +209,57 @@ class EvaluacionController:
         })
     
     @staticmethod
-    def obtener_registros_emociones(id_usuario, dias=30):
-        """Obtener registros de emociones de un usuario"""
-        try:
-            if isinstance(dias, str):
-                dias = int(dias)
-            
-            fecha_limite = date.today() - timedelta(days=dias)
-            
-            conn = get_connection()
-            cursor = get_cursor(conn)  # ✅ CORREGIDO
-            
-            cursor.execute("""
-                SELECT 
-                    re.id_registro as id,
-                    re.tipo_registro as tipo,
-                    re.momento,
-                    re.fecha,
-                    re.comentario,
-                    ec.emocion as emocionGeneral,
-                    ee.emocion as emocionEspecifica
-                FROM registro_emociones_usuario re
-                LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
-                LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
-                WHERE re.id_usuario = %s AND re.fecha >= %s
-                ORDER BY re.fecha DESC
-            """, (id_usuario, fecha_limite))
-            
-            registros = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            
-            for registro in registros:
-                if registro.get('fecha'):
-                    registro['fecha'] = str(registro['fecha'])
-            
-            return jsonify({
-                "success": True,
-                "registros": registros
-            })
-            
-        except Exception as e:
-            print(f"❌ Error: {str(e)}")
-            traceback.print_exc()
-            return jsonify({"success": False, "message": str(e)}), 500
+    @staticmethod
+def obtener_registros_emociones(id_usuario, dias=30):
+    """Obtener registros de emociones de un usuario"""
+    try:
+        if isinstance(dias, str):
+            dias = int(dias)
+        
+        fecha_limite = date.today() - timedelta(days=dias)
+        
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        
+        cursor.execute("""
+            SELECT 
+                re.id_registro as id,
+                re.tipo_registro as tipo,
+                re.momento,
+                re.fecha,
+                re.comentario,
+                COALESCE(ec.emocion, 'Sin emoción') as emocionGeneral,
+                COALESCE(ee.emocion, 'Sin emoción específica') as emocionEspecifica
+            FROM registro_emociones_usuario re
+            LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
+            LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
+            WHERE re.id_usuario = %s AND re.fecha >= %s
+            ORDER BY re.fecha DESC
+        """, (id_usuario, fecha_limite))
+        
+        registros = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        for registro in registros:
+            if registro.get('fecha'):
+                registro['fecha'] = str(registro['fecha'])
+            # Asegurar que nunca sean null
+            if registro.get('emocionGeneral') is None:
+                registro['emocionGeneral'] = 'Sin emoción'
+            if registro.get('emocionEspecifica') is None:
+                registro['emocionEspecifica'] = 'Sin especificar'
+        
+        return jsonify({
+            "success": True,
+            "registros": registros
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        traceback.print_exc()
+        return jsonify({"success": False, "message": str(e)}), 500
+        
+        
+        
+        
