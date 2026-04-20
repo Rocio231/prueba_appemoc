@@ -140,8 +140,8 @@ def obtener_registros_emociones_directo(id_usuario):
                 re.momento,
                 re.fecha,
                 re.comentario,
-                ec.emocion as emocionGeneral,
-                ee.emocion as emocionEspecifica
+                ec.emocion as emociongeneral,
+                ee.emocion as emocionespecifica
             FROM registro_emociones_usuario re
             LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
             LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
