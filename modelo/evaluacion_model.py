@@ -1,5 +1,14 @@
+import sys
+import logging
 from db.BD import get_connection, get_cursor
 from datetime import datetime, date, timedelta
+
+# Configurar logging para que aparezca en Render
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
 
 class EvaluacionModel:
     """Modelo para manejar evaluaciones"""
@@ -42,7 +51,7 @@ class EvaluacionModel:
             conn.close()
             return list(preguntas.values())
         except Exception as e:
-            print(f"❌ Error en obtener_preguntas_hads: {str(e)}")
+            logging.error(f"❌ Error en obtener_preguntas_hads: {str(e)}")
             return []
     
     @staticmethod
@@ -82,7 +91,7 @@ class EvaluacionModel:
             conn.close()
             return list(preguntas.values())
         except Exception as e:
-            print(f"❌ Error en obtener_preguntas_ders: {str(e)}")
+            logging.error(f"❌ Error en obtener_preguntas_ders: {str(e)}")
             return []
     
     @staticmethod
@@ -117,7 +126,7 @@ class EvaluacionModel:
                 dias_restantes = 30 - dias_diferencia
                 return False, f"Debe esperar {dias_restantes} días para volver a realizar HADS"
         except Exception as e:
-            print(f"❌ Error en puede_responder_hads: {str(e)}")
+            logging.error(f"❌ Error en puede_responder_hads: {str(e)}")
             return False, "Error al verificar disponibilidad"
     
     @staticmethod
@@ -150,7 +159,7 @@ class EvaluacionModel:
             else:
                 return True, "Puede realizar la evaluación DERS"
         except Exception as e:
-            print(f"❌ Error en puede_responder_ders: {str(e)}")
+            logging.error(f"❌ Error en puede_responder_ders: {str(e)}")
             return False, "Error al verificar disponibilidad"
     
     @staticmethod
@@ -171,23 +180,30 @@ class EvaluacionModel:
             conn.commit()
             cursor.close()
             conn.close()
+            logging.info(f"✅ Evaluación creada: id={id_evaluacion}, tipo={tipo_evaluacion}")
             return True, id_evaluacion
         except Exception as e:
-            print(f"❌ Error en crear_evaluacion: {str(e)}")
+            logging.error(f"❌ Error en crear_evaluacion: {str(e)}")
             return False, None
     
     @staticmethod
     def guardar_respuestas_hads(id_evaluacion, respuestas):
         """Guardar respuestas de evaluación HADS"""
         try:
+            logging.info(f"=== GUARDANDO RESPUESTAS HADS ===")
+            logging.info(f"ID Evaluación: {id_evaluacion}")
+            logging.info(f"Número de respuestas: {len(respuestas)}")
+            
             conn = get_connection()
-            cursor = get_cursor(conn)  
+            cursor = get_cursor(conn)
             
             puntaje_total = 0
-            for respuesta in respuestas:
+            for i, respuesta in enumerate(respuestas):
                 id_pregunta = respuesta.get('id_pregunta')
                 id_respuesta = respuesta.get('id_respuesta')
                 puntaje = respuesta.get('puntaje', 0)
+                
+                logging.info(f"Respuesta {i}: pregunta={id_pregunta}, respuesta={id_respuesta}, puntaje={puntaje}")
                 
                 cursor.execute("""
                     INSERT INTO respuestas_usuario_hads 
@@ -203,23 +219,34 @@ class EvaluacionModel:
             conn.commit()
             cursor.close()
             conn.close()
+            
+            logging.info(f"✅ Respuestas guardadas exitosamente. Puntaje total: {puntaje_total}")
             return True, puntaje_total
+            
         except Exception as e:
-            print(f"❌ Error en guardar_respuestas_hads: {str(e)}")
+            logging.error(f"❌ ERROR en guardar_respuestas_hads: {str(e)}")
+            import traceback
+            traceback.print_exc(file=sys.stdout)
             return False, None
     
     @staticmethod
     def guardar_respuestas_ders(id_evaluacion, respuestas):
         """Guardar respuestas de evaluación DERS"""
         try:
+            logging.info(f"=== GUARDANDO RESPUESTAS DERS ===")
+            logging.info(f"ID Evaluación: {id_evaluacion}")
+            logging.info(f"Número de respuestas: {len(respuestas)}")
+            
             conn = get_connection()
-            cursor = get_cursor(conn)  
+            cursor = get_cursor(conn)
             
             puntaje_total = 0
-            for respuesta in respuestas:
+            for i, respuesta in enumerate(respuestas):
                 id_pregunta = respuesta.get('id_pregunta')
                 id_respuesta = respuesta.get('id_respuesta')
                 puntaje = respuesta.get('puntaje', 0)
+                
+                logging.info(f"Respuesta {i}: pregunta={id_pregunta}, respuesta={id_respuesta}, puntaje={puntaje}")
                 
                 cursor.execute("""
                     INSERT INTO respuestas_usuario_ders 
@@ -235,9 +262,14 @@ class EvaluacionModel:
             conn.commit()
             cursor.close()
             conn.close()
+            
+            logging.info(f"✅ Respuestas DERS guardadas exitosamente. Puntaje total: {puntaje_total}")
             return True, puntaje_total
+            
         except Exception as e:
-            print(f"❌ Error en guardar_respuestas_ders: {str(e)}")
+            logging.error(f"❌ ERROR en guardar_respuestas_ders: {str(e)}")
+            import traceback
+            traceback.print_exc(file=sys.stdout)
             return False, None
     
     @staticmethod
@@ -259,7 +291,7 @@ class EvaluacionModel:
             conn.close()
             return evaluaciones
         except Exception as e:
-            print(f"❌ Error en obtener_evaluaciones_usuario: {str(e)}")
+            logging.error(f"❌ Error en obtener_evaluaciones_usuario: {str(e)}")
             return []
     
     @staticmethod
@@ -267,7 +299,7 @@ class EvaluacionModel:
         """Obtener detalle de evaluación HADS"""
         try:
             conn = get_connection()
-            cursor = get_cursor(conn)  # ✅ CORREGIDO
+            cursor = get_cursor(conn)
             
             cursor.execute("""
                 SELECT ru.id_pregunta, ru.id_respuesta, ru.puntaje,
@@ -296,7 +328,7 @@ class EvaluacionModel:
             
             return respuestas, puntaje_ansiedad, puntaje_depresion
         except Exception as e:
-            print(f"❌ Error en obtener_detalle_hads: {str(e)}")
+            logging.error(f"❌ Error en obtener_detalle_hads: {str(e)}")
             return [], 0, 0
     
     @staticmethod
@@ -347,7 +379,7 @@ class EvaluacionModel:
             
             return respuestas, categorias
         except Exception as e:
-            print(f"❌ Error en obtener_detalle_ders: {str(e)}")
+            logging.error(f"❌ Error en obtener_detalle_ders: {str(e)}")
             return [], {}
     
     @staticmethod
@@ -367,7 +399,7 @@ class EvaluacionModel:
             conn.close()
             return emociones_generales, emociones_especificas
         except Exception as e:
-            print(f"❌ Error en obtener_emociones: {str(e)}")
+            logging.error(f"❌ Error en obtener_emociones: {str(e)}")
             return [], []
     
     @staticmethod
@@ -389,5 +421,5 @@ class EvaluacionModel:
             conn.close()
             return True, id_registro
         except Exception as e:
-            print(f"❌ Error en registrar_emocion: {str(e)}")
+            logging.error(f"❌ Error en registrar_emocion: {str(e)}")
             return False, None
