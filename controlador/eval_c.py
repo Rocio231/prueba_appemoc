@@ -1,6 +1,6 @@
 from flask import jsonify, request
 from modelo.evaluacion_model import EvaluacionModel
-from db.BD import get_connection
+from db.BD import get_connection, get_cursor
 import traceback
 from datetime import date, timedelta
 
@@ -96,7 +96,8 @@ class EvaluacionController:
                 return jsonify({"success": False, "message": "Respuestas requeridas"}), 400
             
             conn = get_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = get_cursor(conn)  # ✅ CORREGIDO
+            
             cursor.execute("SELECT tipo_evaluacion FROM evaluacion WHERE id_evaluacion = %s", (id_evaluacion,))
             eval_data = cursor.fetchone()
             cursor.close()
@@ -196,66 +197,59 @@ class EvaluacionController:
         except Exception as e:
             return jsonify({"success": False, "message": str(e)}), 500
     
-    # ============================
-    # OBTENER REGISTROS DE EMOCIONES (NUEVO)
-    # ============================
-# En controlador/eval_c.py, dentro de la clase EvaluacionController, agrega:
-
-@staticmethod
-def test_emociones(id_usuario, dias=30):
-    """Método de prueba para verificar que el controlador funciona"""
-    return jsonify({
-        "success": True,
-        "message": f"Método funcionando para usuario {id_usuario} con {dias} días",
-        "test_data": [
-            {"emocionGeneral": "Alegría", "emocionEspecifica": "Éxtasis", "tipo": "predominante"}
-        ]
-    })
-
-@staticmethod
-def obtener_registros_emociones(id_usuario, dias=30):
-    """Obtener registros de emociones de un usuario"""
-    try:
-        from datetime import date, timedelta
-        
-        if isinstance(dias, str):
-            dias = int(dias)
-        
-        fecha_limite = date.today() - timedelta(days=dias)
-        
-        conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT 
-                re.id_registro as id,
-                re.tipo_registro as tipo,
-                re.momento,
-                re.fecha,
-                re.comentario,
-                ec.emocion as emocionGeneral,
-                ee.emocion as emocionEspecifica
-            FROM registro_emociones_usuario re
-            LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
-            LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
-            WHERE re.id_usuario = %s AND re.fecha >= %s
-            ORDER BY re.fecha DESC
-        """, (id_usuario, fecha_limite))
-        
-        registros = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        for registro in registros:
-            if registro['fecha']:
-                registro['fecha'] = str(registro['fecha'])
-        
+    @staticmethod
+    def test_emociones(id_usuario, dias=30):
+        """Método de prueba para verificar que el controlador funciona"""
         return jsonify({
             "success": True,
-            "registros": registros
+            "message": f"Método funcionando para usuario {id_usuario} con {dias} días",
+            "test_data": [
+                {"emocionGeneral": "Alegría", "emocionEspecifica": "Éxtasis", "tipo": "predominante"}
+            ]
         })
-        
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        traceback.print_exc()
-        return jsonify({"success": False, "message": str(e)}), 500
+    
+    @staticmethod
+    def obtener_registros_emociones(id_usuario, dias=30):
+        """Obtener registros de emociones de un usuario"""
+        try:
+            if isinstance(dias, str):
+                dias = int(dias)
+            
+            fecha_limite = date.today() - timedelta(days=dias)
+            
+            conn = get_connection()
+            cursor = get_cursor(conn)  # ✅ CORREGIDO
+            
+            cursor.execute("""
+                SELECT 
+                    re.id_registro as id,
+                    re.tipo_registro as tipo,
+                    re.momento,
+                    re.fecha,
+                    re.comentario,
+                    ec.emocion as emocionGeneral,
+                    ee.emocion as emocionEspecifica
+                FROM registro_emociones_usuario re
+                LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
+                LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
+                WHERE re.id_usuario = %s AND re.fecha >= %s
+                ORDER BY re.fecha DESC
+            """, (id_usuario, fecha_limite))
+            
+            registros = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            for registro in registros:
+                if registro.get('fecha'):
+                    registro['fecha'] = str(registro['fecha'])
+            
+            return jsonify({
+                "success": True,
+                "registros": registros
+            })
+            
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+            traceback.print_exc()
+            return jsonify({"success": False, "message": str(e)}), 500
