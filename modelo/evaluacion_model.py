@@ -5,28 +5,46 @@ class EvaluacionModel:
     """Modelo para manejar evaluaciones"""
     
     @staticmethod
-    @staticmethod
-def obtener_preguntas_hads():
-    """Obtener todas las preguntas HADS"""
-    try:
-        conn = get_connection()
-        cursor = get_cursor(conn)
-        
-        # Consulta simple
-        cursor.execute("SELECT id_pregunta, pregunta, tipo FROM preguntas_hads")
-        resultados = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        print(f"✅ Encontradas {len(resultados)} preguntas")
-        return resultados
-        
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return []
+    def obtener_preguntas_hads():
+        """Obtener todas las preguntas HADS con sus opciones de respuesta"""
+        try:
+            conn = get_connection()
+            cursor = get_cursor(conn)  
+            
+            cursor.execute("""
+                SELECT p.id_pregunta, p.pregunta as texto, p.tipo as categoria,
+                       r.id_respuesta, r.opcion as respuesta_texto, r.puntaje
+                FROM preguntas_hads p
+                LEFT JOIN respuestas_hads r ON p.id_pregunta = r.id_pregunta
+                ORDER BY p.id_pregunta, r.puntaje
+            """)
+            
+            resultados = cursor.fetchall()
+            
+            preguntas = {}
+            for row in resultados:
+                id_pregunta = row['id_pregunta']
+                if id_pregunta not in preguntas:
+                    preguntas[id_pregunta] = {
+                        'id_pregunta': id_pregunta,
+                        'texto': row['texto'],
+                        'categoria': row['categoria'],
+                        'respuestas': []
+                    }
+                if row['id_respuesta']:
+                    preguntas[id_pregunta]['respuestas'].append({
+                        'id_respuesta': row['id_respuesta'],
+                        'texto': row['respuesta_texto'],
+                        'puntaje': row['puntaje']
+                    })
+            
+            cursor.close()
+            conn.close()
+            return list(preguntas.values())
+        except Exception as e:
+            print(f"❌ Error en obtener_preguntas_hads: {str(e)}")
+            return []
+    
     @staticmethod
     def obtener_preguntas_ders():
         """Obtener todas las preguntas DERS con sus opciones de respuesta"""
