@@ -172,32 +172,22 @@ def obtener_registros_emociones_directo(id_usuario):
         return jsonify({"success": False, "message": str(e)}), 500
 
 # =========================================
-# BIOMARCADORES
+# BIOMARCADORES ESTADÍSTICAS (NUEVA TABLA)
 # =========================================
 
-@app.route('/guardar_biomarcadores', methods=['POST'])
-def guardar_biomarcadores():
+@app.route('/guardar_biomarcadores_estadisticas', methods=['POST'])
+def guardar_biomarcadores_estadisticas():
     """
-    Guarda los biomarcadores diarios del usuario
-    Espera JSON: {
-        "id_usuario": int,
-        "fecha": "YYYY-MM-DD",
-        "pasos": int,
-        "ritmo_cardiaco": int (opcional),
-        "sueno_minutos": int,
-        "hrv_ms": float
-    }
+    Guarda las estadísticas de biomarcadores en la tabla registrobiomark
+    Espera JSON con todos los campos de la tabla
     """
     try:
         data = request.get_json()
-        print(f"📊 Recibiendo biomarcadores: {data}")
+        print(f"📊 Recibiendo estadísticas de biomarcadores: {data}")
         
+        # Obtener datos del request
         id_usuario = data.get('id_usuario')
         fecha = data.get('fecha')
-        pasos = data.get('pasos', 0)
-        ritmo_cardiaco = data.get('ritmo_cardiaco')
-        sueno_minutos = data.get('sueno_minutos', 0)
-        hrv_ms = data.get('hrv_ms', 0.0)
         
         # Validar datos requeridos
         if not id_usuario:
@@ -207,7 +197,7 @@ def guardar_biomarcadores():
         
         # Validar que el usuario existe
         conn = get_connection()
-        cursor = get_cursor(conn)  # ✅ CORREGIDO
+        cursor = get_cursor(conn)
         
         cursor.execute("SELECT id_usuario FROM usuario WHERE id_usuario = %s", (id_usuario,))
         usuario = cursor.fetchone()
@@ -217,9 +207,35 @@ def guardar_biomarcadores():
             conn.close()
             return jsonify({'error': 'Usuario no encontrado'}), 404
         
+        # Obtener todos los campos con valores por defecto
+        steps_mean = data.get('steps_mean', 0.0)
+        steps_std = data.get('steps_std', 0.0)
+        steps_max = data.get('steps_max', 0)
+        steps_sum = data.get('steps_sum', 0)
+        
+        rr_mean = data.get('rr_mean', 0.0)
+        rr_std = data.get('rr_std', 0.0)
+        rr_min = data.get('rr_min', 0)
+        rr_max = data.get('rr_max', 0)
+        
+        heartrate_mean = data.get('heartrate_mean', 0.0)
+        heartrate_std = data.get('heartrate_std', 0.0)
+        heartrate_min = data.get('heartrate_min', 0)
+        heartrate_max = data.get('heartrate_max', 0)
+        
+        vfc_mean = data.get('vfc_mean', 0.0)
+        vfc_std = data.get('vfc_std', 0.0)
+        vfc_min = data.get('vfc_min', 0)
+        vfc_max = data.get('vfc_max', 0)
+        
+        deepsleeptime_max = data.get('deepsleeptime_max', 0.0)
+        shallowsleeptime_max = data.get('shallowsleeptime_max', 0.0)
+        waketime_max = data.get('waketime_max', 0.0)
+        remtime_max = data.get('remtime_max', 0.0)
+        
         # Verificar si ya existe un registro para esta fecha
         cursor.execute("""
-            SELECT id FROM biomarcadores_diarios 
+            SELECT id FROM registrobiomark 
             WHERE id_usuario = %s AND fecha = %s
         """, (id_usuario, fecha))
         
@@ -228,23 +244,58 @@ def guardar_biomarcadores():
         if existe:
             # Actualizar registro existente
             cursor.execute("""
-                UPDATE biomarcadores_diarios 
-                SET pasos = %s,
-                    ritmo_cardiaco = %s,
-                    sueno_minutos = %s,
-                    hrv_ms = %s,
-                    updated_at = CURRENT_TIMESTAMP
+                UPDATE registrobiomark 
+                SET steps_mean = %s,
+                    steps_std = %s,
+                    steps_max = %s,
+                    steps_sum = %s,
+                    rr_mean = %s,
+                    rr_std = %s,
+                    rr_min = %s,
+                    rr_max = %s,
+                    heartrate_mean = %s,
+                    heartrate_std = %s,
+                    heartrate_min = %s,
+                    heartrate_max = %s,
+                    vfc_mean = %s,
+                    vfc_std = %s,
+                    vfc_min = %s,
+                    vfc_max = %s,
+                    deepsleeptime_max = %s,
+                    shallowsleeptime_max = %s,
+                    waketime_max = %s,
+                    remtime_max = %s,
+                    created_at = CURRENT_TIMESTAMP
                 WHERE id_usuario = %s AND fecha = %s
-            """, (pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, id_usuario, fecha))
-            mensaje = "Biomarcadores actualizados correctamente"
+            """, (
+                steps_mean, steps_std, steps_max, steps_sum,
+                rr_mean, rr_std, rr_min, rr_max,
+                heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
+                vfc_mean, vfc_std, vfc_min, vfc_max,
+                deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max,
+                id_usuario, fecha
+            ))
+            mensaje = "Estadísticas de biomarcadores actualizadas correctamente"
         else:
             # Insertar nuevo registro
             cursor.execute("""
-                INSERT INTO biomarcadores_diarios 
-                (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms))
-            mensaje = "Biomarcadores guardados correctamente"
+                INSERT INTO registrobiomark (
+                    id_usuario, fecha,
+                    steps_mean, steps_std, steps_max, steps_sum,
+                    rr_mean, rr_std, rr_min, rr_max,
+                    heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
+                    vfc_mean, vfc_std, vfc_min, vfc_max,
+                    deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                id_usuario, fecha,
+                steps_mean, steps_std, steps_max, steps_sum,
+                rr_mean, rr_std, rr_min, rr_max,
+                heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
+                vfc_mean, vfc_std, vfc_min, vfc_max,
+                deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max
+            ))
+            mensaje = "Estadísticas de biomarcadores guardadas correctamente"
         
         conn.commit()
         cursor.close()
@@ -256,15 +307,16 @@ def guardar_biomarcadores():
         }), 200
         
     except Exception as e:
-        print(f"❌ Error al guardar biomarcadores: {str(e)}")
+        print(f"❌ Error al guardar estadísticas de biomarcadores: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/obtener_biomarcadores/<int:id_usuario>', methods=['GET'])
-def obtener_biomarcadores(id_usuario):
+
+@app.route('/obtener_biomarcadores_estadisticas/<int:id_usuario>', methods=['GET'])
+def obtener_biomarcadores_estadisticas(id_usuario):
     """
-    Obtiene los biomarcadores de un usuario
+    Obtiene las estadísticas de biomarcadores de un usuario desde registrobiomark
     Parámetros opcionales: ?fecha=YYYY-MM-DD o ?dias=30
     """
     try:
@@ -272,21 +324,19 @@ def obtener_biomarcadores(id_usuario):
         dias = request.args.get('dias', 30, type=int)
         
         conn = get_connection()
-        cursor = get_cursor(conn)  # ✅ CORREGIDO
+        cursor = get_cursor(conn)
         
         if fecha:
-            # Obtener biomarcadores de una fecha específica
+            # Obtener estadísticas de una fecha específica
             cursor.execute("""
-                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
-                FROM biomarcadores_diarios 
+                SELECT * FROM registrobiomark 
                 WHERE id_usuario = %s AND fecha = %s
                 ORDER BY fecha DESC
             """, (id_usuario, fecha))
         else:
-            # Obtener biomarcadores de los últimos N días
+            # Obtener estadísticas de los últimos N días
             cursor.execute("""
-                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
-                FROM biomarcadores_diarios 
+                SELECT * FROM registrobiomark 
                 WHERE id_usuario = %s 
                 ORDER BY fecha DESC
                 LIMIT %s
@@ -294,7 +344,7 @@ def obtener_biomarcadores(id_usuario):
         
         registros = cursor.fetchall()
         
-        # Convertir fechas a string
+        # Convertir fechas a string para JSON
         for registro in registros:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
@@ -306,20 +356,239 @@ def obtener_biomarcadores(id_usuario):
         
         return jsonify({
             'success': True,
-            'biomarcadores': registros,
+            'registros': registros,
             'total': len(registros)
         }), 200
         
     except Exception as e:
-        print(f"❌ Error al obtener biomarcadores: {str(e)}")
+        print(f"❌ Error al obtener estadísticas: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/biomarcador_ultimo/<int:id_usuario>', methods=['GET'])
-def obtener_ultimo_biomarcador(id_usuario):
-    """Obtiene el último biomarcador registrado del usuario"""
+
+@app.route('/biomarcador_estadisticas_ultimo/<int:id_usuario>', methods=['GET'])
+def obtener_ultimas_estadisticas_biomarcador(id_usuario):
+    """Obtiene las últimas estadísticas de biomarcadores del usuario"""
     try:
         conn = get_connection()
-        cursor = get_cursor(conn)  # ✅ CORREGIDO
+        cursor = get_cursor(conn)
+        
+        cursor.execute("""
+            SELECT * FROM registrobiomark 
+            WHERE id_usuario = %s 
+            ORDER BY fecha DESC
+            LIMIT 1
+        """, (id_usuario,))
+        
+        registro = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if registro:
+            if registro.get('fecha'):
+                registro['fecha'] = str(registro['fecha'])
+            if registro.get('created_at'):
+                registro['created_at'] = str(registro['created_at'])
+            return jsonify({'success': True, 'registro': registro}), 200
+        else:
+            return jsonify({'success': True, 'registro': None, 'message': 'No hay registros'}), 200
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/resumen_estadisticas_usuario/<int:id_usuario>', methods=['GET'])
+def resumen_estadisticas_usuario(id_usuario):
+    """
+    Obtiene un resumen estadístico de todos los registros del usuario
+    """
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        
+        # Obtener estadísticas agregadas
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_registros,
+                MIN(fecha) as primera_fecha,
+                MAX(fecha) as ultima_fecha,
+                AVG(steps_mean) as promedio_steps_mean,
+                AVG(steps_sum) as promedio_steps_diarios,
+                MAX(steps_max) as max_steps_diarios,
+                AVG(heartrate_mean) as promedio_heartrate,
+                MIN(heartrate_min) as min_heartrate,
+                MAX(heartrate_max) as max_heartrate,
+                AVG(vfc_mean) as promedio_vfc,
+                AVG(deepsleeptime_max) as promedio_sueno_profundo,
+                AVG(shallowsleeptime_max) as promedio_sueno_ligero,
+                AVG(remtime_max) as promedio_sueno_rem
+            FROM registrobiomark 
+            WHERE id_usuario = %s
+        """, (id_usuario,))
+        
+        resumen = cursor.fetchone()
+        
+        # Obtener últimos 7 días para tendencias
+        cursor.execute("""
+            SELECT 
+                fecha,
+                steps_sum,
+                heartrate_mean,
+                vfc_mean,
+                deepsleeptime_max + shallowsleeptime_max + remtime_max as total_sueno
+            FROM registrobiomark 
+            WHERE id_usuario = %s 
+            ORDER BY fecha DESC
+            LIMIT 7
+        """, (id_usuario,))
+        
+        tendencias = cursor.fetchall()
+        
+        # Convertir fechas a string
+        if resumen and resumen.get('primera_fecha'):
+            resumen['primera_fecha'] = str(resumen['primera_fecha'])
+        if resumen and resumen.get('ultima_fecha'):
+            resumen['ultima_fecha'] = str(resumen['ultima_fecha'])
+        
+        for tendencia in tendencias:
+            if tendencia.get('fecha'):
+                tendencia['fecha'] = str(tendencia['fecha'])
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'resumen': resumen,
+            'tendencias_7dias': tendencias
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# =========================================
+# BIOMARCADORES LEGACY (MANTENER COMPATIBILIDAD)
+# =========================================
+
+@app.route('/guardar_biomarcadores', methods=['POST'])
+def guardar_biomarcadores_legacy():
+    """
+    ENDPOINT LEGACY: Mantenido para compatibilidad
+    Guarda biomarcadores simples en la tabla biomarcadores_diarios
+    """
+    try:
+        data = request.get_json()
+        print(f"📊 Recibiendo biomarcadores (legacy): {data}")
+        
+        id_usuario = data.get('id_usuario')
+        fecha = data.get('fecha')
+        pasos = data.get('pasos', 0)
+        ritmo_cardiaco = data.get('ritmo_cardiaco')
+        sueno_minutos = data.get('sueno_minutos', 0)
+        hrv_ms = data.get('hrv_ms', 0.0)
+        
+        if not id_usuario or not fecha:
+            return jsonify({'error': 'id_usuario y fecha son requeridos'}), 400
+        
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        
+        cursor.execute("SELECT id_usuario FROM usuario WHERE id_usuario = %s", (id_usuario,))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        cursor.execute("""
+            SELECT id FROM biomarcadores_diarios 
+            WHERE id_usuario = %s AND fecha = %s
+        """, (id_usuario, fecha))
+        
+        existe = cursor.fetchone()
+        
+        if existe:
+            cursor.execute("""
+                UPDATE biomarcadores_diarios 
+                SET pasos = %s, ritmo_cardiaco = %s, sueno_minutos = %s, hrv_ms = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id_usuario = %s AND fecha = %s
+            """, (pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, id_usuario, fecha))
+            mensaje = "Biomarcadores actualizados correctamente"
+        else:
+            cursor.execute("""
+                INSERT INTO biomarcadores_diarios 
+                (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms))
+            mensaje = "Biomarcadores guardados correctamente"
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'mensaje': mensaje, 'success': True}), 200
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/obtener_biomarcadores/<int:id_usuario>', methods=['GET'])
+def obtener_biomarcadores_legacy(id_usuario):
+    """
+    ENDPOINT LEGACY: Obtiene biomarcadores de la tabla biomarcadores_diarios
+    """
+    try:
+        fecha = request.args.get('fecha')
+        dias = request.args.get('dias', 30, type=int)
+        
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        
+        if fecha:
+            cursor.execute("""
+                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
+                FROM biomarcadores_diarios 
+                WHERE id_usuario = %s AND fecha = %s
+                ORDER BY fecha DESC
+            """, (id_usuario, fecha))
+        else:
+            cursor.execute("""
+                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
+                FROM biomarcadores_diarios 
+                WHERE id_usuario = %s 
+                ORDER BY fecha DESC
+                LIMIT %s
+            """, (id_usuario, dias))
+        
+        registros = cursor.fetchall()
+        
+        for registro in registros:
+            if registro.get('fecha'):
+                registro['fecha'] = str(registro['fecha'])
+            if registro.get('created_at'):
+                registro['created_at'] = str(registro['created_at'])
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True, 'biomarcadores': registros, 'total': len(registros)}), 200
+        
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/biomarcador_ultimo/<int:id_usuario>', methods=['GET'])
+def obtener_ultimo_biomarcador_legacy(id_usuario):
+    """ENDPOINT LEGACY: Obtiene el último biomarcador de biomarcadores_diarios"""
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
         
         cursor.execute("""
             SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
@@ -346,6 +615,7 @@ def obtener_ultimo_biomarcador(id_usuario):
         print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
 # =========================================
 # RUTA DE PRUEBA
 # =========================================
@@ -353,6 +623,7 @@ def obtener_ultimo_biomarcador(id_usuario):
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
+
 
 # =========================================
 # MANEJO DE ERRORES
@@ -399,10 +670,15 @@ if __name__ == '__main__':
         print("   GET  /emociones/obtener")
         print("   POST /emociones/registrar")
         print("   GET  /emociones/registros/<id>")
+        print("\n📊 ENDPOINTS BIOMARCADORES (NUEVOS):")
+        print("   POST /guardar_biomarcadores_estadisticas")
+        print("   GET  /obtener_biomarcadores_estadisticas/<id>")
+        print("   GET  /biomarcador_estadisticas_ultimo/<id>")
+        print("   GET  /resumen_estadisticas_usuario/<id>")
+        print("\n📊 ENDPOINTS BIOMARCADORES (LEGACY):")
         print("   POST /guardar_biomarcadores")
         print("   GET  /obtener_biomarcadores/<id>")
         print("   GET  /biomarcador_ultimo/<id>")
         print("="*50 + "\n")
         
         app.run(host='0.0.0.0', port=5000, debug=True)
-
