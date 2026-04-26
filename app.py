@@ -5,14 +5,41 @@ import hashlib
 from controlador.c_usuario import UsuarioController
 from controlador.eval_c import EvaluacionController
 from datetime import date, timedelta
+import pandas as pd
+from xgboost import XGBClassifier
 import os
 
 app = Flask(__name__)
 CORS(app)
+modelo = XGBClassifier()
+modelo.load_model("modelo_xgboost.json")
 
-# =========================================
-# RUTAS DE USUARIO
-# =========================================
+print("✅ Modelo XGBoost cargado correctamente")
+
+# HADS
+PREGUNTAS_ANSIEDAD = [1,3,5,7,9,11,13]
+PREGUNTAS_DEPRESION = [2,4,6,8,10,12,14]
+
+# EMOCIONES
+EMOCIONES_POSITIVAS = [1,2,8]
+EMOCIONES_NEGATIVAS = [3,5,6,7]
+
+# COLUMNAS DEL MODELO
+COLUMNAS_MODELO = [
+    "steps_mean","steps_std","steps_max","steps_sum",
+    "rr_mean","rr_std","rr_min","rr_max",
+    "heartrate_mean","heartrate_std","heartrate_min","heartrate_max",
+    "vfc_mean","vfc_std","vfc_min","vfc_max",
+    "deepsleeptime_max","shallowsleeptime_max","waketime_max","remtime_max",
+    "ansiedad","depresion",
+    "valencia_emocional","intensidad_emocional",
+    *[f"emocion_general_{i}" for i in range(1,9)],
+    *[f"emocion_especifica_{i}" for i in range(1,17)]
+]
+
+
+######## RUTAS DE USUARIO ##########
+
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -22,9 +49,7 @@ def login():
 def register():
     return UsuarioController.register()
 
-# =========================================
-# RUTAS DE PREGUNTAS
-# =========================================
+######### RUTAS DE PREGUNTAS ########
 
 @app.route('/preguntas/hads', methods=['GET'])
 def obtener_preguntas_hads():
@@ -34,9 +59,7 @@ def obtener_preguntas_hads():
 def obtener_preguntas_ders():
     return EvaluacionController.obtener_preguntas_ders()
 
-# =========================================
-# RUTAS DE VERIFICACIÓN
-# =========================================
+######### RUTAS DE VERIFICACIÓN ########
 
 @app.route('/verificar/hads', methods=['POST'])
 def verificar_hads():
@@ -46,10 +69,7 @@ def verificar_hads():
 def verificar_ders():
     return EvaluacionController.verificar_ders()
 
-# =========================================
-# RUTAS DE EVALUACIONES
-# =========================================
-
+############ RUTAS DE EVALUACIONES ##########
 @app.route('/evaluacion/nueva', methods=['POST'])
 def evaluacion_nueva():
     return EvaluacionController.crear_evaluacion()
@@ -70,9 +90,7 @@ def guardar_respuestas_hads():
 def guardar_respuestas_ders():
     return EvaluacionController.guardar_respuestas()
 
-# =========================================
-# RESULTADOS
-# =========================================
+############## RESULTADOS ##############
 
 @app.route('/evaluaciones/usuario/<int:id_usuario>', methods=['GET'])
 def obtener_evaluaciones_usuario(id_usuario):
@@ -96,9 +114,7 @@ def obtener_detalle_evaluacion(id_evaluacion, tipo):
     else:
         return EvaluacionController.obtener_detalle_ders(id_evaluacion)
 
-# =========================================
-# EMOCIONES
-# =========================================
+########### EMOCIONES ############
 
 @app.route('/emociones/obtener', methods=['GET'])
 def obtener_emociones():
@@ -158,7 +174,7 @@ def obtener_registros_emociones_directo(id_usuario):
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
         
-        print(f"✅ Encontrados {len(registros)} registros")
+        print(f" Encontrados {len(registros)} registros")
         
         return jsonify({
             "success": True,
@@ -166,15 +182,12 @@ def obtener_registros_emociones_directo(id_usuario):
         })
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# =========================================
-# BIOMARCADORES ESTADÍSTICAS (NUEVA TABLA)
-# =========================================
-
+##### BIOMARCADORES ############
 @app.route('/guardar_biomarcadores_estadisticas', methods=['POST'])
 def guardar_biomarcadores_estadisticas():
     """
@@ -183,7 +196,7 @@ def guardar_biomarcadores_estadisticas():
     """
     try:
         data = request.get_json()
-        print(f"📊 Recibiendo estadísticas de biomarcadores: {data}")
+        print(f"Recibiendo biomarcadores: {data}")
         
         # Obtener datos del request
         id_usuario = data.get('id_usuario')
@@ -275,7 +288,7 @@ def guardar_biomarcadores_estadisticas():
                 deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max,
                 id_usuario, fecha
             ))
-            mensaje = "Estadísticas de biomarcadores actualizadas correctamente"
+            mensaje = "biomarcadores actualizados correctamente"
         else:
             # Insertar nuevo registro
             cursor.execute("""
@@ -295,7 +308,7 @@ def guardar_biomarcadores_estadisticas():
                 vfc_mean, vfc_std, vfc_min, vfc_max,
                 deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max
             ))
-            mensaje = "Estadísticas de biomarcadores guardadas correctamente"
+            mensaje = "biomarcadores guardados correctamente"
         
         conn.commit()
         cursor.close()
@@ -307,7 +320,7 @@ def guardar_biomarcadores_estadisticas():
         }), 200
         
     except Exception as e:
-        print(f"❌ Error al guardar estadísticas de biomarcadores: {str(e)}")
+        print(f" Error al guardar biomarcadores: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -361,7 +374,7 @@ def obtener_biomarcadores_estadisticas(id_usuario):
         }), 200
         
     except Exception as e:
-        print(f"❌ Error al obtener estadísticas: {str(e)}")
+        print(f" Error al obtener estadísticas: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -393,7 +406,7 @@ def obtener_ultimas_estadisticas_biomarcador(id_usuario):
             return jsonify({'success': True, 'registro': None, 'message': 'No hay registros'}), 200
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f" Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -468,9 +481,7 @@ def resumen_estadisticas_usuario(id_usuario):
         return jsonify({'error': str(e)}), 500
 
 
-# =========================================
-# BIOMARCADORES LEGACY (MANTENER COMPATIBILIDAD)
-# =========================================
+###### BIOMARCADORES LEGACY #######
 
 @app.route('/guardar_biomarcadores', methods=['POST'])
 def guardar_biomarcadores_legacy():
@@ -531,7 +542,7 @@ def guardar_biomarcadores_legacy():
         return jsonify({'mensaje': mensaje, 'success': True}), 200
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f" Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -616,18 +627,142 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
         return jsonify({'error': str(e)}), 500
 
 
-# =========================================
-# RUTA DE PRUEBA
-# =========================================
+##### RUTA DE PRUEBA ########
 
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
+########## modelo ########
+@app.route('/prediccion/<int:id_usuario>', methods=['GET'])
+def prediccion_usuario(id_usuario):
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
 
+        # Biomarcadores
+        cursor.execute("""
+            SELECT *
+            FROM registrobiomark
+            WHERE id_usuario = %s
+            ORDER BY fecha DESC
+            LIMIT 1
+        """, (id_usuario,))
+        
+        biomark = cursor.fetchone()
 
-# =========================================
-# MANEJO DE ERRORES
-# =========================================
+        if not biomark:
+            return jsonify({
+                "success": False,
+                "message": "No hay biomarcadores para este usuario"
+            }), 404
+
+        # HADS
+        
+        cursor.execute("""
+            SELECT r.id_pregunta, r.puntaje
+            FROM respuesta r
+            INNER JOIN evaluacion e ON e.id_evaluacion = r.id_evaluacion
+            WHERE e.id_usuario = %s
+            ORDER BY e.id_evaluacion DESC
+            LIMIT 14
+        """, (id_usuario,))
+        
+        respuestas = cursor.fetchall()
+
+        ansiedad = 0
+        depresion = 0
+
+        for r in respuestas:
+            pregunta = r['id_pregunta']
+            puntaje = r['puntaje']
+
+            if pregunta in PREGUNTAS_ANSIEDAD:
+                ansiedad += puntaje
+            elif pregunta in PREGUNTAS_DEPRESION:
+                depresion += puntaje
+
+        # emociones 
+        cursor.execute("""
+            SELECT id_emocion_general, id_emocion_especifica, tipo_registro
+            FROM registro_emociones_usuario
+            WHERE id_usuario = %s
+            ORDER BY id_registro DESC
+            LIMIT 1
+        """, (id_usuario,))
+        
+        emocion = cursor.fetchone()
+
+        id_general = None
+        id_especifica = None
+        valencia = 0
+        intensidad = 0
+
+        if emocion:
+            id_general = emocion['id_emocion_general']
+            id_especifica = emocion['id_emocion_especifica']
+            tipo = emocion['tipo_registro']
+
+            if id_general in EMOCIONES_POSITIVAS:
+                valencia = 1
+            elif id_general in EMOCIONES_NEGATIVAS:
+                valencia = -1
+
+            intensidad = 2 if tipo == "extraordinaria" else 1
+
+        ### INPUT MODELO
+        
+        data_modelo = {}
+
+        for col in COLUMNAS_MODELO:
+            data_modelo[col] = 0
+
+        # biomarcadores
+        for col in biomark:
+            if col in data_modelo:
+                data_modelo[col] = biomark[col]
+
+        # hads
+        data_modelo["ansiedad"] = ansiedad
+        data_modelo["depresion"] = depresion
+
+        # emociones
+        data_modelo["valencia_emocional"] = valencia
+        data_modelo["intensidad_emocional"] = intensidad
+
+        # one hot general
+        if id_general:
+            data_modelo[f"emocion_general_{id_general}"] = 1
+
+        # one hot específica
+        if id_especifica:
+            data_modelo[f"emocion_especifica_{id_especifica}"] = 1
+
+        # Predicción
+        df = pd.DataFrame([data_modelo])
+        df = df[COLUMNAS_MODELO]
+
+        pred = modelo.predict(df)
+        proba = modelo.predict_proba(df)
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "ansiedad": ansiedad,
+            "depresion": depresion,
+            "prediccion": int(pred[0]),
+            "probabilidades": proba[0].tolist()
+        })
+
+    except Exception as e:
+        print(f"❌ Error en predicción: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+######### MANEJO DE ERRORES #####
 
 @app.errorhandler(404)
 def not_found(error):
@@ -679,6 +814,7 @@ if __name__ == '__main__':
         print("   POST /guardar_biomarcadores")
         print("   GET  /obtener_biomarcadores/<id>")
         print("   GET  /biomarcador_ultimo/<id>")
+        print("   GET  /prediccion/<id>")
         print("="*50 + "\n")
         
         app.run(host='0.0.0.0', port=5000, debug=True)
