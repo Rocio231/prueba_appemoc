@@ -2,4 +2,8 @@ Flask
 flask-cors
 psycopg2-binary
 python-dotenv
+pandas
+xgboost
+scikit-learn
+numpy
 gunicorn
