@@ -659,28 +659,32 @@ def prediccion_usuario(id_usuario):
         # HADS
         
         cursor.execute("""
-            SELECT r.id_pregunta, r.puntaje
-            FROM respuesta r
-            INNER JOIN evaluacion e ON e.id_evaluacion = r.id_evaluacion
-            WHERE e.id_usuario = %s
-            ORDER BY e.id_evaluacion DESC
-            LIMIT 14
-        """, (id_usuario,))
-        
-        respuestas = cursor.fetchall()
+    SELECT id_evaluacion
+    FROM evaluacion
+    WHERE id_usuario = %s AND tipo = 'HADS'
+    ORDER BY id_evaluacion DESC
+    LIMIT 1
+""", (id_usuario,))
 
-        ansiedad = 0
-        depresion = 0
+eval_hads = cursor.fetchone()
 
-        for r in respuestas:
-            pregunta = r['id_pregunta']
-            puntaje = r['puntaje']
+ansiedad = 0
+depresion = 0
 
-            if pregunta in PREGUNTAS_ANSIEDAD:
-                ansiedad += puntaje
-            elif pregunta in PREGUNTAS_DEPRESION:
-                depresion += puntaje
+if eval_hads:
+    cursor.execute("""
+        SELECT id_pregunta, puntaje
+        FROM respuestas_usuario_hads
+        WHERE id_evaluacion = %s
+    """, (eval_hads['id_evaluacion'],))
 
+    respuestas = cursor.fetchall()
+
+    for r in respuestas:
+        if r['id_pregunta'] in PREGUNTAS_ANSIEDAD:
+            ansiedad += r['puntaje']
+        elif r['id_pregunta'] in PREGUNTAS_DEPRESION:
+            depresion += r['puntaje']
         # emociones 
         cursor.execute("""
             SELECT id_emocion_general, id_emocion_especifica, tipo_registro
