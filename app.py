@@ -734,205 +734,158 @@ def diagnostico_completo(id_usuario):
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 ########## modelo ########
-@app.route('/prediccion/<int:id_usuario>', methods=['GET'])
-def prediccion_usuario(id_usuario):
-    import traceback
-    import sys
-    
-    print(f"\n{'='*60}")
-    print(f"🔮 INICIANDO PREDICCIÓN PARA USUARIO: {id_usuario}")
-    print(f"{'='*60}")
-    
-    resultado_final = {
-        "success": False,
-        "error": None,
-        "pasos": []
-    }
-    
+@app.route('/prediccion_simulada', methods=['GET'])
+def prediccion_simulada():
+    """
+    Endpoint de prueba con datos simulados para verificar que el modelo funciona
+    """
     try:
-        # Verificar modelo
         if modelo is None:
-            error_msg = "Modelo XGBoost no está cargado"
-            print(f"❌ {error_msg}")
-            resultado_final["error"] = error_msg
-            return jsonify(resultado_final), 500
+            return jsonify({
+                "success": False,
+                "error": "Modelo no cargado",
+                "solucion": "El archivo modelo_xgboost.json no está en el servidor"
+            }), 500
         
-        print("✅ Modelo cargado correctamente")
-        resultado_final["pasos"].append("Modelo OK")
-        
-        # Conectar a BD
-        print("📡 Conectando a base de datos...")
-        conn = get_connection()
-        cursor = get_cursor(conn)
-        print("✅ Conexión exitosa")
-        resultado_final["pasos"].append("Conexión BD OK")
-        
-        # BIOMARCADORES
-        print("📊 Buscando biomarcadores...")
-        cursor.execute("""
-            SELECT *
-            FROM registrobiomark
-            WHERE id_usuario = %s
-            ORDER BY fecha DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
-        biomark = cursor.fetchone()
-        if not biomark:
-            error_msg = f"No hay biomarcadores para usuario {id_usuario}"
-            print(f"❌ {error_msg}")
-            cursor.close()
-            conn.close()
-            resultado_final["error"] = error_msg
-            return jsonify(resultado_final), 404
-        
-        print(f"✅ Biomarcadores encontrados para fecha {biomark.get('fecha')}")
-        resultado_final["pasos"].append("Biomarcadores OK")
-        
-        # HADS
-        print("📋 Calculando puntajes HADS...")
-        ansiedad = 0
-        depresion = 0
-        
-        cursor.execute("""
-            SELECT id_evaluacion
-            FROM evaluacion
-            WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
-            ORDER BY fecha DESC, id_evaluacion DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
-        eval_hads = cursor.fetchone()
-        
-        if eval_hads:
-            cursor.execute("""
-                SELECT id_pregunta, puntaje
-                FROM respuestas_usuario_hads
-                WHERE id_evaluacion = %s
-            """, (eval_hads['id_evaluacion'],))
+        # Datos simulados (valores realistas)
+        datos_simulados = {
+            # Biomarcadores - valores normales/medios
+            "steps_mean": 5500.0,
+            "steps_std": 1200.0,
+            "steps_max": 8500,
+            "steps_sum": 38500,
+            "rr_mean": 0.85,
+            "rr_std": 0.12,
+            "rr_min": 0.65,
+            "rr_max": 1.05,
+            "heartrate_mean": 72.5,
+            "heartrate_std": 8.5,
+            "heartrate_min": 58,
+            "heartrate_max": 92,
+            "vfc_mean": 48.5,
+            "vfc_std": 6.5,
+            "vfc_min": 38,
+            "vfc_max": 62,
+            "deepsleeptime_max": 95.0,
+            "shallowsleeptime_max": 225.0,
+            "waketime_max": 35.0,
+            "remtime_max": 85.0,
             
-            respuestas = cursor.fetchall()
-            print(f"   Respuestas HADS encontradas: {len(respuestas)}")
+            # HADS - puntajes normales (bajo riesgo)
+            "Ansiedad": 5,
+            "Depresion": 4,
             
-            for r in respuestas:
-                pregunta = r['id_pregunta']
-                puntaje = r['puntaje']
-                if pregunta in PREGUNTAS_ANSIEDAD:
-                    ansiedad += puntaje
-                elif pregunta in PREGUNTAS_DEPRESION:
-                    depresion += puntaje
-        
-        print(f"   Ansiedad: {ansiedad}, Depresión: {depresion}")
-        resultado_final["pasos"].append(f"HADS OK (A:{ansiedad}, D:{depresion})")
-        
-        # EMOCIONES
-        print("😊 Buscando última emoción...")
-        cursor.execute("""
-            SELECT 
-                re.id_emocion_general,
-                re.id_emocion_especifica,
-                re.tipo_registro,
-                ec.emocion as emocion_general_nombre,
-                ee.emocion as emocion_especifica_nombre
-            FROM registro_emociones_usuario re
-            LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
-            LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
-            WHERE re.id_usuario = %s
-            ORDER BY re.id_registro DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
-        emocion = cursor.fetchone()
-        
-        emocion_general_nombre = "Ninguna"
-        emocion_especifica_nombre = "Ninguna"
-        tipo_registro = "predominante"
-        
-        if emocion:
-            emocion_general_nombre = emocion.get('emocion_general_nombre') or "Ninguna"
-            emocion_especifica_nombre = emocion.get('emocion_especifica_nombre') or "Ninguna"
-            tipo_registro = emocion.get('tipo_registro', 'predominante')
-            print(f"   Emoción General: {emocion_general_nombre}")
-            print(f"   Emoción Específica: {emocion_especifica_nombre}")
-            print(f"   Tipo: {tipo_registro}")
-        else:
-            print("   No hay emociones registradas, usando valores por defecto")
-        
-        resultado_final["pasos"].append(f"Emociones OK (G:{emocion_general_nombre}, E:{emocion_especifica_nombre}, T:{tipo_registro})")
-        
-        # CONSTRUIR INPUT
-        print("🏗️ Construyendo input para el modelo...")
-        
-        data_modelo = {
-            "steps_mean": float(biomark.get('steps_mean', 0)),
-            "steps_std": float(biomark.get('steps_std', 0)),
-            "steps_max": int(biomark.get('steps_max', 0)),
-            "steps_sum": int(biomark.get('steps_sum', 0)),
-            "rr_mean": float(biomark.get('rr_mean', 0)),
-            "rr_std": float(biomark.get('rr_std', 0)),
-            "rr_min": int(biomark.get('rr_min', 0)),
-            "rr_max": int(biomark.get('rr_max', 0)),
-            "heartrate_mean": float(biomark.get('heartrate_mean', 0)),
-            "heartrate_std": float(biomark.get('heartrate_std', 0)),
-            "heartrate_min": int(biomark.get('heartrate_min', 0)),
-            "heartrate_max": int(biomark.get('heartrate_max', 0)),
-            "vfc_mean": float(biomark.get('vfc_mean', 0)),
-            "vfc_std": float(biomark.get('vfc_std', 0)),
-            "vfc_min": int(biomark.get('vfc_min', 0)),
-            "vfc_max": int(biomark.get('vfc_max', 0)),
-            "deepsleeptime_max": float(biomark.get('deepsleeptime_max', 0)),
-            "shallowsleeptime_max": float(biomark.get('shallowsleeptime_max', 0)),
-            "waketime_max": float(biomark.get('waketime_max', 0)),
-            "remtime_max": float(biomark.get('remtime_max', 0)),
-            "Ansiedad": ansiedad,
-            "Depresion": depresion,
-            "Emocion Normal predominante": emocion_general_nombre if tipo_registro == "predominante" else "Ninguna",
-            "Emocion específica predominante": emocion_especifica_nombre if tipo_registro == "predominante" else "Ninguna",
-            "Emocion extraordinaria general": emocion_general_nombre if tipo_registro == "extraordinaria" else "Ninguna",
-            "Emocion extraordinaria específica": emocion_especifica_nombre if tipo_registro == "extraordinaria" else "Ninguna"
+            # Emociones predominantes
+            "Emocion Normal predominante": "Alegría",
+            "Emocion específica predominante": "Contento",
+            "Emocion extraordinaria general": "Ninguna",
+            "Emocion extraordinaria específica": "Ninguna"
         }
         
-        print(f"   Input: {data_modelo}")
-        resultado_final["pasos"].append("Input construido")
+        print(f"📊 Datos simulados: {datos_simulados}")
         
-        # PREDICCIÓN
-        print("🤖 Ejecutando predicción...")
-        df = pd.DataFrame([data_modelo])
+        # Convertir a DataFrame
+        df = pd.DataFrame([datos_simulados])
+        
+        # Asegurar que tiene todas las columnas necesarias
+        for col in COLUMNAS_MODELO:
+            if col not in df.columns:
+                df[col] = 0
+        
+        # Reordenar columnas
         df = df[COLUMNAS_MODELO]
         
-        print(f"   DataFrame shape: {df.shape}")
-        print(f"   Columnas: {list(df.columns)}")
-        
+        # Predicción
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
         
-        print(f"✅ Predicción: {int(pred[0])}")
-        print(f"   Probabilidades: {proba[0].tolist()}")
-        
-        cursor.close()
-        conn.close()
-        
-        resultado_final["success"] = True
-        resultado_final["ansiedad"] = ansiedad
-        resultado_final["depresion"] = depresion
-        resultado_final["prediccion"] = int(pred[0])
-        resultado_final["probabilidades"] = proba[0].tolist()
-        
-        print(f"{'='*60}\n")
-        
-        return jsonify(resultado_final)
+        return jsonify({
+            "success": True,
+            "datos_entrada": datos_simulados,
+            "prediccion": int(pred[0]),
+            "probabilidades": proba[0].tolist(),
+            "interpretacion": "Riesgo Alto" if int(pred[0]) == 1 else "Sin Riesgo",
+            "confianza": max(proba[0]) * 100
+        })
         
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ ERROR EN PREDICCIÓN: {error_msg}")
-        print(f"   Tipo: {type(e).__name__}")
-        traceback.print_exc()
-        print(f"{'='*60}\n")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+@app.route('/prediccion_test_multiple', methods=['GET'])
+def prediccion_test_multiple():
+    """
+    Prueba múltiples escenarios diferentes
+    """
+    try:
+        if modelo is None:
+            return jsonify({"success": False, "error": "Modelo no cargado"}), 500
         
-        resultado_final["error"] = error_msg
-        resultado_final["tipo_error"] = type(e).__name__
+        # Escenario 1: Persona saludable (bajo riesgo)
+        caso_1 = {
+            "steps_mean": 7000.0, "steps_std": 800.0, "steps_max": 10000, "steps_sum": 49000,
+            "rr_mean": 0.95, "rr_std": 0.08, "rr_min": 0.80, "rr_max": 1.10,
+            "heartrate_mean": 68.0, "heartrate_std": 6.0, "heartrate_min": 55, "heartrate_max": 85,
+            "vfc_mean": 55.0, "vfc_std": 5.0, "vfc_min": 45, "vfc_max": 70,
+            "deepsleeptime_max": 110.0, "shallowsleeptime_max": 240.0, "waketime_max": 25.0, "remtime_max": 100.0,
+            "Ansiedad": 3, "Depresion": 2,
+            "Emocion Normal predominante": "Alegría", "Emocion específica predominante": "Contento",
+            "Emocion extraordinaria general": "Ninguna", "Emocion extraordinaria específica": "Ninguna"
+        }
         
-        return jsonify(resultado_final), 500
+        # Escenario 2: Persona con riesgo alto
+        caso_2 = {
+            "steps_mean": 2500.0, "steps_std": 500.0, "steps_max": 4000, "steps_sum": 17500,
+            "rr_mean": 0.65, "rr_std": 0.15, "rr_min": 0.50, "rr_max": 0.85,
+            "heartrate_mean": 85.0, "heartrate_std": 12.0, "heartrate_min": 70, "heartrate_max": 110,
+            "vfc_mean": 35.0, "vfc_std": 8.0, "vfc_min": 25, "vfc_max": 50,
+            "deepsleeptime_max": 60.0, "shallowsleeptime_max": 180.0, "waketime_max": 60.0, "remtime_max": 50.0,
+            "Ansiedad": 12, "Depresion": 10,
+            "Emocion Normal predominante": "Tristeza", "Emocion específica predominante": "Triste",
+            "Emocion extraordinaria general": "Ninguna", "Emocion extraordinaria específica": "Ninguna"
+        }
+        
+        # Escenario 3: Persona con emociones extraordinarias
+        caso_3 = {
+            "steps_mean": 5500.0, "steps_std": 1100.0, "steps_max": 8000, "steps_sum": 38500,
+            "rr_mean": 0.82, "rr_std": 0.11, "rr_min": 0.62, "rr_max": 1.00,
+            "heartrate_mean": 78.0, "heartrate_std": 9.0, "heartrate_min": 62, "heartrate_max": 95,
+            "vfc_mean": 42.0, "vfc_std": 7.0, "vfc_min": 32, "vfc_max": 58,
+            "deepsleeptime_max": 85.0, "shallowsleeptime_max": 210.0, "waketime_max": 40.0, "remtime_max": 80.0,
+            "Ansiedad": 8, "Depresion": 7,
+            "Emocion Normal predominante": "Ninguna", "Emocion específica predominante": "Ninguna",
+            "Emocion extraordinaria general": "Éxtasis", "Emocion extraordinaria específica": "Felicidad extrema"
+        }
+        
+        resultados = []
+        
+        for i, caso in enumerate([caso_1, caso_2, caso_3], 1):
+            df = pd.DataFrame([caso])
+            for col in COLUMNAS_MODELO:
+                if col not in df.columns:
+                    df[col] = 0
+            df = df[COLUMNAS_MODELO]
+            
+            pred = modelo.predict(df)
+            proba = modelo.predict_proba(df)
+            
+            resultados.append({
+                "escenario": i,
+                "descripcion": ["Saludable (bajo riesgo)", "Riesgo alto", "Emociones extraordinarias"][i-1],
+                "prediccion": int(pred[0]),
+                "probabilidad_riesgo": proba[0][1],
+                "probabilidad_sin_riesgo": proba[0][0],
+                "datos": caso
+            })
+        
+        return jsonify({
+            "success": True,
+            "resultados": resultados
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 ######### MANEJO DE ERRORES #####
 
 @app.errorhandler(404)
