@@ -429,7 +429,6 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
         return jsonify({'error': str(e)}), 500
 
 #### PREDICCION CORREGIDA ####
-#### PREDICCION CORREGIDA ####
 
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
@@ -580,9 +579,9 @@ def prediccion_usuario(id_usuario):
         # IMPORTANTE: Ajusta este mapeo según el orden real de tu modelo
         # Los logs mostrarán las probabilidades para que puedas identificar el orden
         indice_a_nombre = {
-            0: 'Grave',
-            1: 'Leve', 
-            2: 'Moderado'
+            0: 'Bajo',
+            1: 'Moderado', 
+            2: 'Intenso'
         }
 
         resultado = indice_a_nombre.get(clase_idx, 'Leve')
