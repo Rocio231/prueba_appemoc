@@ -649,16 +649,39 @@ def test():
 ########## modelo ########
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
+    import traceback
+    import sys
+    
+    print(f"\n{'='*60}")
+    print(f"🔮 INICIANDO PREDICCIÓN PARA USUARIO: {id_usuario}")
+    print(f"{'='*60}")
+    
+    resultado_final = {
+        "success": False,
+        "error": None,
+        "pasos": []
+    }
+    
     try:
-        print(f"\n🔮 Predicción para usuario: {id_usuario}")
-        
+        # Verificar modelo
         if modelo is None:
-            return jsonify({"success": False, "error": "Modelo no disponible"}), 500
+            error_msg = "Modelo XGBoost no está cargado"
+            print(f"❌ {error_msg}")
+            resultado_final["error"] = error_msg
+            return jsonify(resultado_final), 500
         
+        print("✅ Modelo cargado correctamente")
+        resultado_final["pasos"].append("Modelo OK")
+        
+        # Conectar a BD
+        print("📡 Conectando a base de datos...")
         conn = get_connection()
         cursor = get_cursor(conn)
-
-        # 1. BIOMARCADORES
+        print("✅ Conexión exitosa")
+        resultado_final["pasos"].append("Conexión BD OK")
+        
+        # BIOMARCADORES
+        print("📊 Buscando biomarcadores...")
         cursor.execute("""
             SELECT *
             FROM registrobiomark
@@ -668,16 +691,19 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
         
         biomark = cursor.fetchone()
-
         if not biomark:
+            error_msg = f"No hay biomarcadores para usuario {id_usuario}"
+            print(f"❌ {error_msg}")
             cursor.close()
             conn.close()
-            return jsonify({
-                "success": False,
-                "message": "No hay biomarcadores para este usuario"
-            }), 404
-
-        # 2. HADS
+            resultado_final["error"] = error_msg
+            return jsonify(resultado_final), 404
+        
+        print(f"✅ Biomarcadores encontrados para fecha {biomark.get('fecha')}")
+        resultado_final["pasos"].append("Biomarcadores OK")
+        
+        # HADS
+        print("📋 Calculando puntajes HADS...")
         ansiedad = 0
         depresion = 0
         
@@ -690,7 +716,7 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
         
         eval_hads = cursor.fetchone()
-
+        
         if eval_hads:
             cursor.execute("""
                 SELECT id_pregunta, puntaje
@@ -699,7 +725,8 @@ def prediccion_usuario(id_usuario):
             """, (eval_hads['id_evaluacion'],))
             
             respuestas = cursor.fetchall()
-
+            print(f"   Respuestas HADS encontradas: {len(respuestas)}")
+            
             for r in respuestas:
                 pregunta = r['id_pregunta']
                 puntaje = r['puntaje']
@@ -707,8 +734,12 @@ def prediccion_usuario(id_usuario):
                     ansiedad += puntaje
                 elif pregunta in PREGUNTAS_DEPRESION:
                     depresion += puntaje
-
-        # 3. EMOCIONES - Obtener el nombre real de la emoción
+        
+        print(f"   Ansiedad: {ansiedad}, Depresión: {depresion}")
+        resultado_final["pasos"].append(f"HADS OK (A:{ansiedad}, D:{depresion})")
+        
+        # EMOCIONES
+        print("😊 Buscando última emoción...")
         cursor.execute("""
             SELECT 
                 re.id_emocion_general,
@@ -725,21 +756,26 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
         
         emocion = cursor.fetchone()
-
+        
         emocion_general_nombre = "Ninguna"
         emocion_especifica_nombre = "Ninguna"
         tipo_registro = "predominante"
-
+        
         if emocion:
             emocion_general_nombre = emocion.get('emocion_general_nombre') or "Ninguna"
             emocion_especifica_nombre = emocion.get('emocion_especifica_nombre') or "Ninguna"
             tipo_registro = emocion.get('tipo_registro', 'predominante')
-
-        print(f"   Emoción General: {emocion_general_nombre}")
-        print(f"   Emoción Específica: {emocion_especifica_nombre}")
-        print(f"   Tipo: {tipo_registro}")
-
-        # 4. CONSTRUIR INPUT DEL MODELO - Usando los nombres reales
+            print(f"   Emoción General: {emocion_general_nombre}")
+            print(f"   Emoción Específica: {emocion_especifica_nombre}")
+            print(f"   Tipo: {tipo_registro}")
+        else:
+            print("   No hay emociones registradas, usando valores por defecto")
+        
+        resultado_final["pasos"].append(f"Emociones OK (G:{emocion_general_nombre}, E:{emocion_especifica_nombre}, T:{tipo_registro})")
+        
+        # CONSTRUIR INPUT
+        print("🏗️ Construyendo input para el modelo...")
+        
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
@@ -768,45 +804,48 @@ def prediccion_usuario(id_usuario):
             "Emocion extraordinaria general": emocion_general_nombre if tipo_registro == "extraordinaria" else "Ninguna",
             "Emocion extraordinaria específica": emocion_especifica_nombre if tipo_registro == "extraordinaria" else "Ninguna"
         }
-
-        print(f"   Datos enviados al modelo: {data_modelo}")
-
-        # 5. PREDICCIÓN
-        df = pd.DataFrame([data_modelo])
         
-        # Asegurar que las columnas están en el orden correcto
+        print(f"   Input: {data_modelo}")
+        resultado_final["pasos"].append("Input construido")
+        
+        # PREDICCIÓN
+        print("🤖 Ejecutando predicción...")
+        df = pd.DataFrame([data_modelo])
         df = df[COLUMNAS_MODELO]
+        
+        print(f"   DataFrame shape: {df.shape}")
+        print(f"   Columnas: {list(df.columns)}")
         
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
-
-        cursor.close()
-        conn.close()
-
+        
         print(f"✅ Predicción: {int(pred[0])}")
         print(f"   Probabilidades: {proba[0].tolist()}")
-
-        return jsonify({
-            "success": True,
-            "ansiedad": ansiedad,
-            "depresion": depresion,
-            "prediccion": int(pred[0]),
-            "probabilidades": proba[0].tolist(),
-            "debug": {
-                "emocion_general": emocion_general_nombre,
-                "emocion_especifica": emocion_especifica_nombre,
-                "tipo_registro": tipo_registro
-            }
-        })
-
+        
+        cursor.close()
+        conn.close()
+        
+        resultado_final["success"] = True
+        resultado_final["ansiedad"] = ansiedad
+        resultado_final["depresion"] = depresion
+        resultado_final["prediccion"] = int(pred[0])
+        resultado_final["probabilidades"] = proba[0].tolist()
+        
+        print(f"{'='*60}\n")
+        
+        return jsonify(resultado_final)
+        
     except Exception as e:
-        print(f"❌ Error en predicción: {str(e)}")
-        import traceback
+        error_msg = str(e)
+        print(f"❌ ERROR EN PREDICCIÓN: {error_msg}")
+        print(f"   Tipo: {type(e).__name__}")
         traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        print(f"{'='*60}\n")
+        
+        resultado_final["error"] = error_msg
+        resultado_final["tipo_error"] = type(e).__name__
+        
+        return jsonify(resultado_final), 500
 ######### MANEJO DE ERRORES #####
 
 @app.errorhandler(404)
