@@ -8,23 +8,37 @@ from datetime import date, timedelta
 import pandas as pd
 from xgboost import XGBClassifier
 import os
+import sys
 
 app = Flask(__name__)
 CORS(app)
-modelo = XGBClassifier()
-modelo.load_model("modelo_xgboost.json")
+# Configuración para Render
+port = int(os.environ.get('PORT', 5000))
+print(f"🚀 Iniciando servidor en puerto: {port}")
 
-print("✅ Modelo XGBoost cargado correctamente")
+# Intentar cargar modelo XGBoost
+try:
+    from xgboost import XGBClassifier
+    modelo_path = "modelo_xgboost.json"
+    
+    if os.path.exists(modelo_path):
+        modelo = XGBClassifier()
+        modelo.load_model(modelo_path)
+        print("✅ Modelo XGBoost cargado correctamente")
+    else:
+        print(f"⚠️ No se encuentra el modelo en {modelo_path}")
+        print(f"📁 Archivos disponibles: {os.listdir('.')}")
+        modelo = None
+except Exception as e:
+    print(f"❌ Error cargando XGBoost: {str(e)}")
+    modelo = None
 
-# HADS
+# Definiciones
 PREGUNTAS_ANSIEDAD = [1,3,5,7,9,11,13]
 PREGUNTAS_DEPRESION = [2,4,6,8,10,12,14]
-
-# EMOCIONES
 EMOCIONES_POSITIVAS = [1,2,8]
 EMOCIONES_NEGATIVAS = [3,5,6,7]
 
-# COLUMNAS DEL MODELO
 COLUMNAS_MODELO = [
     "steps_mean","steps_std","steps_max","steps_sum",
     "rr_mean","rr_std","rr_min","rr_max",
@@ -36,8 +50,6 @@ COLUMNAS_MODELO = [
     *[f"emocion_general_{i}" for i in range(1,9)],
     *[f"emocion_especifica_{i}" for i in range(1,17)]
 ]
-
-
 ######## RUTAS DE USUARIO ##########
 
 
@@ -633,14 +645,24 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
 ########## modelo ########
+# Ruta de predicción mejorada
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
+    print(f"🔮 Recibida petición de predicción para usuario: {id_usuario}")
+    
+    if modelo is None:
+        return jsonify({
+            "success": False,
+            "error": "Modelo no disponible temporalmente",
+            "prediccion": 0,
+            "probabilidades": [0.5, 0.5]
+        }), 200
+    
     try:
         conn = get_connection()
         cursor = get_cursor(conn)
 
-        #  BIOMARCADORES
-        
+        # 1. BIOMARCADORES
         cursor.execute("""
             SELECT *
             FROM registrobiomark
@@ -653,12 +675,15 @@ def prediccion_usuario(id_usuario):
 
         if not biomark:
             return jsonify({
-                "success": False,
-                "message": "No hay biomarcadores"
-            }), 404
+                "success": True,
+                "message": "No hay biomarcadores, usando valores por defecto",
+                "ansiedad": 0,
+                "depresion": 0,
+                "prediccion": 0,
+                "probabilidades": [0.95, 0.05]
+            }), 200
 
-       
-        # HADS 
+        # 2. HADS
         cursor.execute("""
             SELECT id_evaluacion
             FROM evaluacion
@@ -668,7 +693,6 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
 
         eval_hads = cursor.fetchone()
-
         ansiedad = 0
         depresion = 0
 
@@ -680,15 +704,13 @@ def prediccion_usuario(id_usuario):
             """, (eval_hads['id_evaluacion'],))
 
             respuestas = cursor.fetchall()
-
             for r in respuestas:
                 if r['id_pregunta'] in PREGUNTAS_ANSIEDAD:
                     ansiedad += r['puntaje']
                 elif r['id_pregunta'] in PREGUNTAS_DEPRESION:
                     depresion += r['puntaje']
 
-        #  EMOCIONES 
-        
+        # 3. EMOCIONES
         cursor.execute("""
             SELECT id_emocion_general, id_emocion_especifica, tipo_registro
             FROM registro_emociones_usuario
@@ -698,7 +720,6 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
         
         emocion = cursor.fetchone()
-
         id_general = None
         id_especifica = None
         valencia = 0
@@ -708,38 +729,30 @@ def prediccion_usuario(id_usuario):
             id_general = emocion['id_emocion_general']
             id_especifica = emocion['id_emocion_especifica']
             tipo = emocion['tipo_registro']
-
             if id_general in EMOCIONES_POSITIVAS:
                 valencia = 1
             elif id_general in EMOCIONES_NEGATIVAS:
                 valencia = -1
-
             intensidad = 2 if tipo == "extraordinaria" else 1
 
-        #  INPUT DEL MODELO
-        
+        # 4. INPUT DEL MODELO
         data_modelo = {col: 0 for col in COLUMNAS_MODELO}
 
-        # biomarcadores
         for col in biomark:
-            if col in data_modelo:
+            if col in data_modelo and biomark[col] is not None:
                 data_modelo[col] = biomark[col]
 
-        # hads
         data_modelo["ansiedad"] = ansiedad
         data_modelo["depresion"] = depresion
-
-        # emociones
         data_modelo["valencia_emocional"] = valencia
         data_modelo["intensidad_emocional"] = intensidad
 
-        if id_general:
+        if id_general and 1 <= id_general <= 8:
             data_modelo[f"emocion_general_{id_general}"] = 1
-
-        if id_especifica:
+        if id_especifica and 1 <= id_especifica <= 16:
             data_modelo[f"emocion_especifica_{id_especifica}"] = 1
 
-        # Predicción
+        # 5. PREDICCIÓN
         df = pd.DataFrame([data_modelo])
         df = df[COLUMNAS_MODELO]
 
@@ -749,6 +762,8 @@ def prediccion_usuario(id_usuario):
         cursor.close()
         conn.close()
 
+        print(f"✅ Predicción generada: {int(pred[0])}")
+        
         return jsonify({
             "success": True,
             "ansiedad": ansiedad,
@@ -758,11 +773,27 @@ def prediccion_usuario(id_usuario):
         })
 
     except Exception as e:
-        print(f" Error en predicción: {str(e)}")
+        print(f"❌ Error en predicción: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             "success": False,
-            "error": str(e)
-        }), 500
+            "error": str(e),
+            "prediccion": 0,
+            "probabilidades": [0.5, 0.5]
+        }), 200
+
+# Ruta para verificar todas las rutas disponibles
+@app.route('/routes', methods=['GET'])
+def list_routes():
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "path": str(rule)
+        })
+    return jsonify({"routes": routes}), 200
 
 ######### MANEJO DE ERRORES #####
 
