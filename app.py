@@ -622,6 +622,7 @@ def get_emocion_nombre(id_emocion, tipo):
 # REEMPLAZA LA FUNCIÓN DE PREDICCIÓN COMPLETA
 # =========================================
 
+
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
     try:
@@ -708,33 +709,32 @@ def prediccion_usuario(id_usuario):
         print(f"📊 Emociones - General: {nombre_general}, Específica: {nombre_especifica}, Tipo: {tipo_registro}")
         
         # 5. CONSTRUIR INPUT CON ONE-HOT ENCODING
-        # Datos base de biomarcadores (MAYÚSCULAS como espera el modelo)
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
             "steps_max": int(biomark.get('steps_max', 0)),
             "steps_sum": int(biomark.get('steps_sum', 0)),
-            "RR_mean": float(biomark.get('rr_mean', 0)),  # Importante: RR mayúsculas
+            "RR_mean": float(biomark.get('rr_mean', 0)),
             "RR_std": float(biomark.get('rr_std', 0)),
             "RR_min": int(biomark.get('rr_min', 0)),
             "RR_max": int(biomark.get('rr_max', 0)),
-            "heartRate_mean": float(biomark.get('heartrate_mean', 0)),  # heartRate con R mayúscula
+            "heartRate_mean": float(biomark.get('heartrate_mean', 0)),
             "heartRate_std": float(biomark.get('heartrate_std', 0)),
             "heartRate_min": int(biomark.get('heartrate_min', 0)),
             "heartRate_max": int(biomark.get('heartrate_max', 0)),
-            "VFC_mean": float(biomark.get('vfc_mean', 0)),  # VFC mayúsculas
+            "VFC_mean": float(biomark.get('vfc_mean', 0)),
             "VFC_std": float(biomark.get('vfc_std', 0)),
             "VFC_min": int(biomark.get('vfc_min', 0)),
             "VFC_max": int(biomark.get('vfc_max', 0)),
-            "deepSleepTime_max": float(biomark.get('deepsleeptime_max', 0)),  # deepSleepTime camelCase
-            "shallowSleepTime_max": float(biomark.get('shallowsleeptime_max', 0)),  # shallowSleepTime
-            "wakeTime_max": float(biomark.get('waketime_max', 0)),  # wakeTime
-            "REMTime_max": float(biomark.get('remtime_max', 0)),  # REMTime mayúsculas
+            "deepSleepTime_max": float(biomark.get('deepsleeptime_max', 0)),
+            "shallowSleepTime_max": float(biomark.get('shallowsleeptime_max', 0)),
+            "wakeTime_max": float(biomark.get('waketime_max', 0)),
+            "REMTime_max": float(biomark.get('remtime_max', 0)),
             "Ansiedad": ansiedad,
             "Depresion": depresion
         }
         
-        # 6. DEFINIR TODAS LAS POSIBLES EMOCIONES (según tu modelo)
+        # 6. DEFINIR TODAS LAS POSIBLES EMOCIONES
         emociones_generales = ["Asombro", "Éxtasis", "Furia", "Odio", "Pena", "Terror", "Vigilancia"]
         emociones_especificas = [
             "Anticipación", "Aprobación", "Confianza", "Distracción", "Enfado", "Interés",
@@ -743,15 +743,11 @@ def prediccion_usuario(id_usuario):
         
         # Inicializar todas las columnas de emociones en 0
         for emocion_general in emociones_generales:
-            # Para emociones normales predominantes
             data_modelo[f"Emocion Normal predominante_{emocion_general}"] = 0
-            # Para emociones extraordinarias generales
             data_modelo[f"Emocion extraordinaria general_{emocion_general}"] = 0
         
         for emocion_especifica in emociones_especificas:
-            # Para emociones específicas predominantes
             data_modelo[f"Emocion específica predominante_{emocion_especifica}"] = 0
-            # Para emociones extraordinarias específicas
             data_modelo[f"Emocion extraordinaria específica_{emocion_especifica}"] = 0
         
         # 7. ACTIVAR LA EMOCIÓN CORRESPONDIENTE (ONE-HOT)
@@ -811,21 +807,37 @@ def prediccion_usuario(id_usuario):
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
         
-        # 10. RESULTADO
+        # MAPEO DE CLASES (ajusta según el orden que muestre el modelo)
+        # Si el print muestra que modelo.classes_ es [0,1,2] entonces Baja=0, Moderada=1, Grave=2
+        # Si muestra otro orden, ajusta el array 'clases' en consecuencia
+        clases = ['Baja', 'Moderada', 'Grave']
+        
+        # Obtener resultado
+        resultado = clases[pred[0]]
+        probabilidad_max = float(proba[0][pred[0]])
+        
+        print(f"🎯 Predicción: {resultado} (clase {pred[0]}) con probabilidad {probabilidad_max:.2%}")
+        
+        # 10. RESULTADO FINAL
         return jsonify({
             "success": True,
-            "prediccion": int(pred[0]),
-            "probabilidad_sin_riesgo": float(proba[0][0]),
-            "probabilidad_con_riesgo": float(proba[0][1]),
+            "prediccion": resultado,
+            "nivel_riesgo": resultado,
+            "probabilidad": probabilidad_max,
             "ansiedad": ansiedad,
             "depresion": depresion,
             "emocion_general": nombre_general,
             "emocion_especifica": nombre_especifica,
             "tipo_emocion": tipo_registro,
-            "columnas_usadas": len(expected_columns),
-            "debug_info": {
-                "nombres_columnas": list(df.columns[:5]) + ["..."] + list(df.columns[-5:]),
-                "total_columnas": len(df.columns)
+            "diagnostico": {
+                "ansiedad": {
+                    "puntaje": ansiedad,
+                    "nivel": "Normal" if ansiedad <= 7 else "Leve" if ansiedad <= 10 else "Moderada" if ansiedad <= 14 else "Severa"
+                },
+                "depresion": {
+                    "puntaje": depresion,
+                    "nivel": "Normal" if depresion <= 7 else "Leve" if depresion <= 10 else "Moderada" if depresion <= 14 else "Severa"
+                }
             }
         })
         
@@ -834,7 +846,6 @@ def prediccion_usuario(id_usuario):
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
-
 # =========================================
 # ENDPOINTS DE PRUEBA
 # =========================================
