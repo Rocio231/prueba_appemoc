@@ -618,6 +618,10 @@ def get_emocion_nombre(id_emocion, tipo):
 # =========================================
 # ENDPOINT DE PREDICCIÓN
 # =========================================
+# =========================================
+# REEMPLAZA LA FUNCIÓN DE PREDICCIÓN COMPLETA
+# =========================================
+
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
     try:
@@ -697,73 +701,117 @@ def prediccion_usuario(id_usuario):
         cursor.close()
         conn.close()
         
-        # 4. Obtener NOMBRES
+        # 4. Obtener NOMBRES de emociones
         nombre_general = get_emocion_nombre(id_general, "general")
         nombre_especifica = get_emocion_nombre(id_especifica, "especifica")
         
-        print(f"📊 Emociones - General: {nombre_general} (ID:{id_general}), Específica: {nombre_especifica} (ID:{id_especifica})")
+        print(f"📊 Emociones - General: {nombre_general}, Específica: {nombre_especifica}, Tipo: {tipo_registro}")
         
-        # 5. CONSTRUIR INPUT
+        # 5. CONSTRUIR INPUT CON ONE-HOT ENCODING
+        # Datos base de biomarcadores (MAYÚSCULAS como espera el modelo)
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
             "steps_max": int(biomark.get('steps_max', 0)),
             "steps_sum": int(biomark.get('steps_sum', 0)),
-            "rr_mean": float(biomark.get('rr_mean', 0)),
-            "rr_std": float(biomark.get('rr_std', 0)),
-            "rr_min": int(biomark.get('rr_min', 0)),
-            "rr_max": int(biomark.get('rr_max', 0)),
-            "heartrate_mean": float(biomark.get('heartrate_mean', 0)),
-            "heartrate_std": float(biomark.get('heartrate_std', 0)),
-            "heartrate_min": int(biomark.get('heartrate_min', 0)),
-            "heartrate_max": int(biomark.get('heartrate_max', 0)),
-            "vfc_mean": float(biomark.get('vfc_mean', 0)),
-            "vfc_std": float(biomark.get('vfc_std', 0)),
-            "vfc_min": int(biomark.get('vfc_min', 0)),
-            "vfc_max": int(biomark.get('vfc_max', 0)),
-            "deepsleeptime_max": float(biomark.get('deepsleeptime_max', 0)),
-            "shallowsleeptime_max": float(biomark.get('shallowsleeptime_max', 0)),
-            "waketime_max": float(biomark.get('waketime_max', 0)),
-            "remtime_max": float(biomark.get('remtime_max', 0)),
+            "RR_mean": float(biomark.get('rr_mean', 0)),  # Importante: RR mayúsculas
+            "RR_std": float(biomark.get('rr_std', 0)),
+            "RR_min": int(biomark.get('rr_min', 0)),
+            "RR_max": int(biomark.get('rr_max', 0)),
+            "heartRate_mean": float(biomark.get('heartrate_mean', 0)),  # heartRate con R mayúscula
+            "heartRate_std": float(biomark.get('heartrate_std', 0)),
+            "heartRate_min": int(biomark.get('heartrate_min', 0)),
+            "heartRate_max": int(biomark.get('heartrate_max', 0)),
+            "VFC_mean": float(biomark.get('vfc_mean', 0)),  # VFC mayúsculas
+            "VFC_std": float(biomark.get('vfc_std', 0)),
+            "VFC_min": int(biomark.get('vfc_min', 0)),
+            "VFC_max": int(biomark.get('vfc_max', 0)),
+            "deepSleepTime_max": float(biomark.get('deepsleeptime_max', 0)),  # deepSleepTime camelCase
+            "shallowSleepTime_max": float(biomark.get('shallowsleeptime_max', 0)),  # shallowSleepTime
+            "wakeTime_max": float(biomark.get('waketime_max', 0)),  # wakeTime
+            "REMTime_max": float(biomark.get('remtime_max', 0)),  # REMTime mayúsculas
             "Ansiedad": ansiedad,
             "Depresion": depresion
         }
         
-        # Asignar emociones según tipo
-        if tipo_registro == "predominante":
-            data_modelo["Emocion Normal predominante"] = nombre_general
-            data_modelo["Emocion específica predominante"] = nombre_especifica
-            data_modelo["Emocion extraordinaria general"] = "Ninguna"
-            data_modelo["Emocion extraordinaria específica"] = "Ninguna"
-        else:
-            data_modelo["Emocion Normal predominante"] = "Ninguna"
-            data_modelo["Emocion específica predominante"] = "Ninguna"
-            data_modelo["Emocion extraordinaria general"] = nombre_general
-            data_modelo["Emocion extraordinaria específica"] = nombre_especifica
+        # 6. DEFINIR TODAS LAS POSIBLES EMOCIONES (según tu modelo)
+        emociones_generales = ["Asombro", "Éxtasis", "Furia", "Odio", "Pena", "Terror", "Vigilancia"]
+        emociones_especificas = [
+            "Anticipación", "Aprobación", "Confianza", "Distracción", "Enfado", "Interés",
+            "Ira", "Melancolía", "Miedo", "Serenidad", "Sorpresa", "Tedio", "Temor", "Tristeza"
+        ]
         
-        # 6. CONVERTIR A NÚMEROS
-        for col in ["Emocion Normal predominante", "Emocion específica predominante", 
-                    "Emocion extraordinaria general", "Emocion extraordinaria específica"]:
-            valor_texto = data_modelo[col]
-            try:
-                data_modelo[col] = int(label_encoders[col].transform([valor_texto])[0])
-            except:
-                data_modelo[col] = 0
-                print(f"⚠️ Emoción no reconocida: {valor_texto}")
+        # Inicializar todas las columnas de emociones en 0
+        for emocion_general in emociones_generales:
+            # Para emociones normales predominantes
+            data_modelo[f"Emocion Normal predominante_{emocion_general}"] = 0
+            # Para emociones extraordinarias generales
+            data_modelo[f"Emocion extraordinaria general_{emocion_general}"] = 0
         
-        # 7. PREDICCIÓN
+        for emocion_especifica in emociones_especificas:
+            # Para emociones específicas predominantes
+            data_modelo[f"Emocion específica predominante_{emocion_especifica}"] = 0
+            # Para emociones extraordinarias específicas
+            data_modelo[f"Emocion extraordinaria específica_{emocion_especifica}"] = 0
+        
+        # 7. ACTIVAR LA EMOCIÓN CORRESPONDIENTE (ONE-HOT)
+        if tipo_registro == "predominante" or tipo_registro == "normal":
+            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+                col_name = f"Emocion Normal predominante_{nombre_general}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+            
+            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
+                col_name = f"Emocion específica predominante_{nombre_especifica}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+        else:  # extraordinaria
+            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+                col_name = f"Emocion extraordinaria general_{nombre_general}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+            
+            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
+                col_name = f"Emocion extraordinaria específica_{nombre_especifica}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+        
+        # 8. CREAR DATAFRAME Y VERIFICAR COLUMNAS
         df = pd.DataFrame([data_modelo])
         
-        for col in COLUMNAS_MODELO:
-            if col not in df.columns:
+        # Obtener las columnas que espera el modelo
+        expected_columns = modelo.feature_names_in_
+        print(f"📋 Columnas esperadas por el modelo: {len(expected_columns)}")
+        print(f"📊 Columnas generadas: {len(df.columns)}")
+        
+        # Verificar columnas faltantes
+        missing_cols = set(expected_columns) - set(df.columns)
+        if missing_cols:
+            print(f"⚠️ Columnas faltantes: {missing_cols}")
+            for col in missing_cols:
                 df[col] = 0
         
-        df = df[COLUMNAS_MODELO]
+        # Verificar columnas extra
+        extra_cols = set(df.columns) - set(expected_columns)
+        if extra_cols:
+            print(f"⚠️ Columnas extra: {extra_cols}")
+            df = df[expected_columns]
+        
+        # Asegurar el orden correcto
+        df = df[expected_columns]
         df = df.astype(float)
         
+        print(f"✅ DataFrame final: {df.shape}")
+        
+        # 9. PREDICCIÓN
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
         
+        # 10. RESULTADO
         return jsonify({
             "success": True,
             "prediccion": int(pred[0]),
@@ -774,11 +822,10 @@ def prediccion_usuario(id_usuario):
             "emocion_general": nombre_general,
             "emocion_especifica": nombre_especifica,
             "tipo_emocion": tipo_registro,
-            "debug_valores_numericos": {
-                "Emocion Normal predominante": data_modelo["Emocion Normal predominante"],
-                "Emocion específica predominante": data_modelo["Emocion específica predominante"],
-                "Emocion extraordinaria general": data_modelo["Emocion extraordinaria general"],
-                "Emocion extraordinaria específica": data_modelo["Emocion extraordinaria específica"]
+            "columnas_usadas": len(expected_columns),
+            "debug_info": {
+                "nombres_columnas": list(df.columns[:5]) + ["..."] + list(df.columns[-5:]),
+                "total_columnas": len(df.columns)
             }
         })
         
