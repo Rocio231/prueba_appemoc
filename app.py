@@ -39,16 +39,18 @@ PREGUNTAS_DEPRESION = [2,4,6,8,10,12,14]
 EMOCIONES_POSITIVAS = [1,2,8]
 EMOCIONES_NEGATIVAS = [3,5,6,7]
 
+# COLUMNAS DEL MODELO - Debe coincidir exactamente con lo que espera el modelo
 COLUMNAS_MODELO = [
-    "steps_mean","steps_std","steps_max","steps_sum",
-    "rr_mean","rr_std","rr_min","rr_max",
-    "heartrate_mean","heartrate_std","heartrate_min","heartrate_max",
-    "vfc_mean","vfc_std","vfc_min","vfc_max",
-    "deepsleeptime_max","shallowsleeptime_max","waketime_max","remtime_max",
-    "ansiedad","depresion",
-    "valencia_emocional","intensidad_emocional",
-    *[f"emocion_general_{i}" for i in range(1,9)],
-    *[f"emocion_especifica_{i}" for i in range(1,17)]
+    "steps_mean", "steps_std", "steps_max", "steps_sum",
+    "rr_mean", "rr_std", "rr_min", "rr_max",
+    "heartrate_mean", "heartrate_std", "heartrate_min", "heartrate_max",
+    "vfc_mean", "vfc_std", "vfc_min", "vfc_max",
+    "deepsleeptime_max", "shallowsleeptime_max", "waketime_max", "remtime_max",
+    "Ansiedad", "Depresion",
+    "Emocion Normal predominante",
+    "Emocion específica predominante",
+    "Emocion extraordinaria general",
+    "Emocion extraordinaria específica"
 ]
 ######## RUTAS DE USUARIO ##########
 
@@ -645,84 +647,166 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
 ########## modelo ########
-@app.route('/debug/hads/<int:id_usuario>', methods=['GET'])
-def debug_hads(id_usuario):
-    """Endpoint para depurar los puntajes HADS"""
+@app.route('/prediccion/<int:id_usuario>', methods=['GET'])
+def prediccion_usuario(id_usuario):
     try:
+        print(f"\n🔮 Predicción para usuario: {id_usuario}")
+        
+        if modelo is None:
+            return jsonify({"success": False, "error": "Modelo no disponible"}), 500
+        
         conn = get_connection()
         cursor = get_cursor(conn)
-        
-        # Obtener evaluación
+
+        # 1. BIOMARCADORES
         cursor.execute("""
-            SELECT id_evaluacion, fecha, puntaje_total
-            FROM evaluacion
-            WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
+            SELECT *
+            FROM registrobiomark
+            WHERE id_usuario = %s
             ORDER BY fecha DESC
             LIMIT 1
         """, (id_usuario,))
         
-        evaluacion = cursor.fetchone()
-        
-        if not evaluacion:
-            return jsonify({"error": "No HADS evaluation found"}), 404
-        
-        # Obtener respuestas
-        cursor.execute("""
-            SELECT id_pregunta, puntaje
-            FROM respuestas_usuario_hads
-            WHERE id_evaluacion = %s
-            ORDER BY id_pregunta
-        """, (evaluacion['id_evaluacion'],))
-        
-        respuestas = cursor.fetchall()
-        
+        biomark = cursor.fetchone()
+
+        if not biomark:
+            cursor.close()
+            conn.close()
+            return jsonify({
+                "success": False,
+                "message": "No hay biomarcadores para este usuario"
+            }), 404
+
+        # 2. HADS
         ansiedad = 0
         depresion = 0
         
-        resultados = []
-        for r in respuestas:
-            pregunta = r['id_pregunta']
-            puntaje = r['puntaje']
-            tipo = "ansiedad" if pregunta in PREGUNTAS_ANSIEDAD else "depresion" if pregunta in PREGUNTAS_DEPRESION else "otro"
-            
-            if tipo == "ansiedad":
-                ansiedad += puntaje
-            elif tipo == "depresion":
-                depresion += puntaje
-                
-            resultados.append({
-                "pregunta": pregunta,
-                "puntaje": puntaje,
-                "tipo": tipo
-            })
+        cursor.execute("""
+            SELECT id_evaluacion
+            FROM evaluacion
+            WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
+            ORDER BY fecha DESC, id_evaluacion DESC
+            LIMIT 1
+        """, (id_usuario,))
         
+        eval_hads = cursor.fetchone()
+
+        if eval_hads:
+            cursor.execute("""
+                SELECT id_pregunta, puntaje
+                FROM respuestas_usuario_hads
+                WHERE id_evaluacion = %s
+            """, (eval_hads['id_evaluacion'],))
+            
+            respuestas = cursor.fetchall()
+
+            for r in respuestas:
+                pregunta = r['id_pregunta']
+                puntaje = r['puntaje']
+                if pregunta in PREGUNTAS_ANSIEDAD:
+                    ansiedad += puntaje
+                elif pregunta in PREGUNTAS_DEPRESION:
+                    depresion += puntaje
+
+        # 3. EMOCIONES - Obtener el nombre real de la emoción
+        cursor.execute("""
+            SELECT 
+                re.id_emocion_general,
+                re.id_emocion_especifica,
+                re.tipo_registro,
+                ec.emocion as emocion_general_nombre,
+                ee.emocion as emocion_especifica_nombre
+            FROM registro_emociones_usuario re
+            LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
+            LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
+            WHERE re.id_usuario = %s
+            ORDER BY re.id_registro DESC
+            LIMIT 1
+        """, (id_usuario,))
+        
+        emocion = cursor.fetchone()
+
+        emocion_general_nombre = "Ninguna"
+        emocion_especifica_nombre = "Ninguna"
+        tipo_registro = "predominante"
+
+        if emocion:
+            emocion_general_nombre = emocion.get('emocion_general_nombre') or "Ninguna"
+            emocion_especifica_nombre = emocion.get('emocion_especifica_nombre') or "Ninguna"
+            tipo_registro = emocion.get('tipo_registro', 'predominante')
+
+        print(f"   Emoción General: {emocion_general_nombre}")
+        print(f"   Emoción Específica: {emocion_especifica_nombre}")
+        print(f"   Tipo: {tipo_registro}")
+
+        # 4. CONSTRUIR INPUT DEL MODELO - Usando los nombres reales
+        data_modelo = {
+            "steps_mean": float(biomark.get('steps_mean', 0)),
+            "steps_std": float(biomark.get('steps_std', 0)),
+            "steps_max": int(biomark.get('steps_max', 0)),
+            "steps_sum": int(biomark.get('steps_sum', 0)),
+            "rr_mean": float(biomark.get('rr_mean', 0)),
+            "rr_std": float(biomark.get('rr_std', 0)),
+            "rr_min": int(biomark.get('rr_min', 0)),
+            "rr_max": int(biomark.get('rr_max', 0)),
+            "heartrate_mean": float(biomark.get('heartrate_mean', 0)),
+            "heartrate_std": float(biomark.get('heartrate_std', 0)),
+            "heartrate_min": int(biomark.get('heartrate_min', 0)),
+            "heartrate_max": int(biomark.get('heartrate_max', 0)),
+            "vfc_mean": float(biomark.get('vfc_mean', 0)),
+            "vfc_std": float(biomark.get('vfc_std', 0)),
+            "vfc_min": int(biomark.get('vfc_min', 0)),
+            "vfc_max": int(biomark.get('vfc_max', 0)),
+            "deepsleeptime_max": float(biomark.get('deepsleeptime_max', 0)),
+            "shallowsleeptime_max": float(biomark.get('shallowsleeptime_max', 0)),
+            "waketime_max": float(biomark.get('waketime_max', 0)),
+            "remtime_max": float(biomark.get('remtime_max', 0)),
+            "Ansiedad": ansiedad,
+            "Depresion": depresion,
+            "Emocion Normal predominante": emocion_general_nombre if tipo_registro == "predominante" else "Ninguna",
+            "Emocion específica predominante": emocion_especifica_nombre if tipo_registro == "predominante" else "Ninguna",
+            "Emocion extraordinaria general": emocion_general_nombre if tipo_registro == "extraordinaria" else "Ninguna",
+            "Emocion extraordinaria específica": emocion_especifica_nombre if tipo_registro == "extraordinaria" else "Ninguna"
+        }
+
+        print(f"   Datos enviados al modelo: {data_modelo}")
+
+        # 5. PREDICCIÓN
+        df = pd.DataFrame([data_modelo])
+        
+        # Asegurar que las columnas están en el orden correcto
+        df = df[COLUMNAS_MODELO]
+        
+        pred = modelo.predict(df)
+        proba = modelo.predict_proba(df)
+
         cursor.close()
         conn.close()
-        
+
+        print(f"✅ Predicción: {int(pred[0])}")
+        print(f"   Probabilidades: {proba[0].tolist()}")
+
         return jsonify({
-            "id_evaluacion": evaluacion['id_evaluacion'],
-            "fecha": str(evaluacion['fecha']),
-            "puntaje_total": evaluacion['puntaje_total'],
-            "ansiedad_calculada": ansiedad,
-            "depresion_calculada": depresion,
-            "detalle_respuestas": resultados
+            "success": True,
+            "ansiedad": ansiedad,
+            "depresion": depresion,
+            "prediccion": int(pred[0]),
+            "probabilidades": proba[0].tolist(),
+            "debug": {
+                "emocion_general": emocion_general_nombre,
+                "emocion_especifica": emocion_especifica_nombre,
+                "tipo_registro": tipo_registro
+            }
         })
-        
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Ruta para verificar todas las rutas disponibles
-@app.route('/routes', methods=['GET'])
-def list_routes():
-    routes = []
-    for rule in app.url_map.iter_rules():
-        routes.append({
-            "endpoint": rule.endpoint,
-            "methods": list(rule.methods),
-            "path": str(rule)
-        })
-    return jsonify({"routes": routes}), 200
-
+        print(f"❌ Error en predicción: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 ######### MANEJO DE ERRORES #####
 
 @app.errorhandler(404)
