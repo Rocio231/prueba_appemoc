@@ -749,7 +749,7 @@ def prediccion_usuario(id_usuario):
         
         print(f"📊 Emociones - General: {nombre_general}, Específica: {nombre_especifica}, Tipo: {tipo_registro}")
         
-        # CONSTRUIR INPUT (usando el formato que espera el modelo)
+        # CONSTRUIR INPUT - VALORES NUMÉRICOS BÁSICOS
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
@@ -775,35 +775,74 @@ def prediccion_usuario(id_usuario):
             "Depresion": depresion
         }
         
-        # Asignar emociones según tipo (usando LabelEncoder numérico)
-        if tipo_registro == "predominante":
-            data_modelo["Emocion Normal predominante"] = label_encoders["Emocion Normal predominante"].transform([nombre_general])[0]
-            data_modelo["Emocion específica predominante"] = label_encoders["Emocion específica predominante"].transform([nombre_especifica])[0]
-            data_modelo["Emocion extraordinaria general"] = 0
-            data_modelo["Emocion extraordinaria específica"] = 0
+        # LISTA COMPLETA DE EMOCIONES POSIBLES (One-Hot Encoding)
+        emociones_generales = ["Asombro", "Éxtasis", "Furia", "Odio", "Pena", "Terror", "Vigilancia", "Alegría", "Confianza", "Miedo", "Sorpresa", "Tristeza"]
+        emociones_especificas = [
+            "Anticipación", "Aprobación", "Confianza", "Distracción", "Enfado", "Interés",
+            "Ira", "Melancolía", "Miedo", "Serenidad", "Sorpresa", "Tedio", "Temor", "Tristeza", "Alegría"
+        ]
+        
+        # Inicializar todas las columnas de emociones en 0
+        for emocion_general in emociones_generales:
+            data_modelo[f"Emocion Normal predominante_{emocion_general}"] = 0
+            data_modelo[f"Emocion extraordinaria general_{emocion_general}"] = 0
+        
+        for emocion_especifica in emociones_especificas:
+            data_modelo[f"Emocion específica predominante_{emocion_especifica}"] = 0
+            data_modelo[f"Emocion extraordinaria específica_{emocion_especifica}"] = 0
+        
+        # Activar las emociones según el tipo de registro
+        if tipo_registro == "predominante" or tipo_registro == "normal":
+            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+                col_name = f"Emocion Normal predominante_{nombre_general}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+            
+            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
+                col_name = f"Emocion específica predominante_{nombre_especifica}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
         else:  # extraordinaria
-            data_modelo["Emocion Normal predominante"] = 0
-            data_modelo["Emocion específica predominante"] = 0
-            data_modelo["Emocion extraordinaria general"] = label_encoders["Emocion extraordinaria general"].transform([nombre_general])[0]
-            data_modelo["Emocion extraordinaria específica"] = label_encoders["Emocion extraordinaria específica"].transform([nombre_especifica])[0]
+            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+                col_name = f"Emocion extraordinaria general_{nombre_general}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
+            
+            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
+                col_name = f"Emocion extraordinaria específica_{nombre_especifica}"
+                if col_name in data_modelo:
+                    data_modelo[col_name] = 1
+                    print(f"✅ Activada: {col_name}")
         
         # Crear DataFrame
         df = pd.DataFrame([data_modelo])
         
         # Obtener las columnas que espera el modelo
         expected_columns = modelo.feature_names_in_
+        print(f"📊 Columnas esperadas por el modelo: {len(expected_columns)}")
+        print(f"📊 Columnas generadas: {len(df.columns)}")
         
-        # Asegurar todas las columnas
-        for col in expected_columns:
-            if col not in df.columns:
+        # Verificar columnas faltantes
+        missing_cols = set(expected_columns) - set(df.columns)
+        if missing_cols:
+            print(f"⚠️ Columnas faltantes: {list(missing_cols)[:5]}...")
+            for col in missing_cols:
                 df[col] = 0
         
-        # Reordenar
+        # Verificar columnas extra
+        extra_cols = set(df.columns) - set(expected_columns)
+        if extra_cols:
+            print(f"⚠️ Columnas extra: {list(extra_cols)[:5]}...")
+            df = df[expected_columns]
+        
+        # Asegurar el orden correcto
         df = df[expected_columns]
         df = df.astype(float)
         
-        print(f"📊 DataFrame shape: {df.shape}")
-        print(f"📊 Columnas: {list(df.columns)[:5]}...")
+        print(f"📊 DataFrame final: {df.shape}")
         
         # PREDICCIÓN
         pred = modelo.predict(df)
@@ -848,7 +887,7 @@ def prediccion_usuario(id_usuario):
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
-
+       
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
