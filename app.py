@@ -639,7 +639,8 @@ def prediccion_usuario(id_usuario):
         conn = get_connection()
         cursor = get_cursor(conn)
 
-        # Biomarcadores
+        #  BIOMARCADORES
+        
         cursor.execute("""
             SELECT *
             FROM registrobiomark
@@ -653,39 +654,41 @@ def prediccion_usuario(id_usuario):
         if not biomark:
             return jsonify({
                 "success": False,
-                "message": "No hay biomarcadores para este usuario"
+                "message": "No hay biomarcadores"
             }), 404
 
-        # HADS
-        
+       
+        # HADS 
         cursor.execute("""
-    SELECT id_evaluacion
-    FROM evaluacion
-    WHERE id_usuario = %s AND tipo = 'HADS'
-    ORDER BY id_evaluacion DESC
-    LIMIT 1
-""", (id_usuario,))
+            SELECT id_evaluacion
+            FROM evaluacion
+            WHERE id_usuario = %s AND tipo = 'HADS'
+            ORDER BY id_evaluacion DESC
+            LIMIT 1
+        """, (id_usuario,))
 
-eval_hads = cursor.fetchone()
+        eval_hads = cursor.fetchone()
 
-ansiedad = 0
-depresion = 0
+        ansiedad = 0
+        depresion = 0
 
-if eval_hads:
-    cursor.execute("""
-        SELECT id_pregunta, puntaje
-        FROM respuestas_usuario_hads
-        WHERE id_evaluacion = %s
-    """, (eval_hads['id_evaluacion'],))
+        if eval_hads:
+            cursor.execute("""
+                SELECT id_pregunta, puntaje
+                FROM respuestas_usuario_hads
+                WHERE id_evaluacion = %s
+            """, (eval_hads['id_evaluacion'],))
 
-    respuestas = cursor.fetchall()
+            respuestas = cursor.fetchall()
 
-    for r in respuestas:
-        if r['id_pregunta'] in PREGUNTAS_ANSIEDAD:
-            ansiedad += r['puntaje']
-        elif r['id_pregunta'] in PREGUNTAS_DEPRESION:
-            depresion += r['puntaje']
-        # emociones 
+            for r in respuestas:
+                if r['id_pregunta'] in PREGUNTAS_ANSIEDAD:
+                    ansiedad += r['puntaje']
+                elif r['id_pregunta'] in PREGUNTAS_DEPRESION:
+                    depresion += r['puntaje']
+
+        #  EMOCIONES 
+        
         cursor.execute("""
             SELECT id_emocion_general, id_emocion_especifica, tipo_registro
             FROM registro_emociones_usuario
@@ -713,12 +716,9 @@ if eval_hads:
 
             intensidad = 2 if tipo == "extraordinaria" else 1
 
-        ### INPUT MODELO
+        #  INPUT DEL MODELO
         
-        data_modelo = {}
-
-        for col in COLUMNAS_MODELO:
-            data_modelo[col] = 0
+        data_modelo = {col: 0 for col in COLUMNAS_MODELO}
 
         # biomarcadores
         for col in biomark:
@@ -733,11 +733,9 @@ if eval_hads:
         data_modelo["valencia_emocional"] = valencia
         data_modelo["intensidad_emocional"] = intensidad
 
-        # one hot general
         if id_general:
             data_modelo[f"emocion_general_{id_general}"] = 1
 
-        # one hot específica
         if id_especifica:
             data_modelo[f"emocion_especifica_{id_especifica}"] = 1
 
@@ -760,7 +758,7 @@ if eval_hads:
         })
 
     except Exception as e:
-        print(f"❌ Error en predicción: {str(e)}")
+        print(f" Error en predicción: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e)
