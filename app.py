@@ -429,6 +429,7 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
         return jsonify({'error': str(e)}), 500
 
 #### PREDICCION CORREGIDA ####
+#### PREDICCION CORREGIDA ####
 
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
@@ -570,25 +571,24 @@ def prediccion_usuario(id_usuario):
         proba = modelo.predict_proba(df)
 
         # Obtener el indice de la clase con mayor probabilidad
-        clase_idx = pred[0]
+        clase_idx = int(pred[0])
 
         # Obtener la probabilidad de esa clase
         probabilidad_max = float(proba[0][clase_idx])
 
-        # Usar las clases reales del modelo
-        clases = modelo.classes_
-
-        # Mapeo a los nombres que quieres mostrar en la UI
-        mapeo_ui = {
-            'Grave': 'GRAVE',
-            'Moderado': 'MODERADO', 
-            'Leve': 'LEVE'
+        # Mapeo directo de índices a nombres
+        # IMPORTANTE: Ajusta este mapeo según el orden real de tu modelo
+        # Los logs mostrarán las probabilidades para que puedas identificar el orden
+        indice_a_nombre = {
+            0: 'Grave',
+            1: 'Leve', 
+            2: 'Moderado'
         }
 
-        resultado = clases[clase_idx]
-        nivel_ui = mapeo_ui.get(resultado, resultado.upper())
+        resultado = indice_a_nombre.get(clase_idx, 'Leve')
+        nivel_ui = resultado.upper()
 
-        print(f"Clases del modelo: {clases}")
+        print(f"Clase indice: {clase_idx}")
         print(f"Prediccion cruda: {pred}")
         print(f"Probabilidades completas: {proba[0]}")
         print(f"Clase seleccionada: {resultado} con probabilidad {probabilidad_max:.2%}")
@@ -620,8 +620,6 @@ def prediccion_usuario(id_usuario):
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
-
-
 #### TEST ####
 
 @app.route('/test', methods=['GET'])
