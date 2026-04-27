@@ -645,20 +645,11 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
 ########## modelo ########
-# Ruta de predicción mejorada
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
-    print(f"🔮 Recibida petición de predicción para usuario: {id_usuario}")
-    
-    if modelo is None:
-        return jsonify({
-            "success": False,
-            "error": "Modelo no disponible temporalmente",
-            "prediccion": 0,
-            "probabilidades": [0.5, 0.5]
-        }), 200
-    
     try:
+        print(f"🔮 Predicción para usuario: {id_usuario}")
+        
         conn = get_connection()
         cursor = get_cursor(conn)
 
@@ -674,41 +665,48 @@ def prediccion_usuario(id_usuario):
         biomark = cursor.fetchone()
 
         if not biomark:
+            cursor.close()
+            conn.close()
             return jsonify({
-                "success": True,
-                "message": "No hay biomarcadores, usando valores por defecto",
-                "ansiedad": 0,
-                "depresion": 0,
-                "prediccion": 0,
-                "probabilidades": [0.95, 0.05]
-            }), 200
+                "success": False,
+                "message": "No hay biomarcadores para este usuario"
+            }), 404
 
-        # 2. HADS
+        # 2. HADS - Usando la columna correcta 'tipo_evaluacion'
+        ansiedad = 0
+        depresion = 0
+        
+        # Obtener la última evaluación HADS del usuario
         cursor.execute("""
             SELECT id_evaluacion
             FROM evaluacion
-            WHERE id_usuario = %s AND tipo = 'HADS'
-            ORDER BY id_evaluacion DESC
+            WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
+            ORDER BY fecha DESC, id_evaluacion DESC
             LIMIT 1
         """, (id_usuario,))
-
+        
         eval_hads = cursor.fetchone()
-        ansiedad = 0
-        depresion = 0
 
         if eval_hads:
+            # Obtener las respuestas de HADS
             cursor.execute("""
                 SELECT id_pregunta, puntaje
                 FROM respuestas_usuario_hads
                 WHERE id_evaluacion = %s
             """, (eval_hads['id_evaluacion'],))
-
+            
             respuestas = cursor.fetchall()
+            print(f"   Respuestas HADS encontradas: {len(respuestas)}")
+
             for r in respuestas:
-                if r['id_pregunta'] in PREGUNTAS_ANSIEDAD:
-                    ansiedad += r['puntaje']
-                elif r['id_pregunta'] in PREGUNTAS_DEPRESION:
-                    depresion += r['puntaje']
+                pregunta = r['id_pregunta']
+                puntaje = r['puntaje']
+                if pregunta in PREGUNTAS_ANSIEDAD:
+                    ansiedad += puntaje
+                elif pregunta in PREGUNTAS_DEPRESION:
+                    depresion += puntaje
+
+        print(f"   Ansiedad: {ansiedad}, Depresión: {depresion}")
 
         # 3. EMOCIONES
         cursor.execute("""
@@ -720,35 +718,48 @@ def prediccion_usuario(id_usuario):
         """, (id_usuario,))
         
         emocion = cursor.fetchone()
+
         id_general = None
         id_especifica = None
         valencia = 0
         intensidad = 0
 
         if emocion:
-            id_general = emocion['id_emocion_general']
-            id_especifica = emocion['id_emocion_especifica']
-            tipo = emocion['tipo_registro']
+            id_general = emocion.get('id_emocion_general')
+            id_especifica = emocion.get('id_emocion_especifica')
+            tipo = emocion.get('tipo_registro', 'normal')
+
             if id_general in EMOCIONES_POSITIVAS:
                 valencia = 1
             elif id_general in EMOCIONES_NEGATIVAS:
                 valencia = -1
+
             intensidad = 2 if tipo == "extraordinaria" else 1
+
+        print(f"   Valencia: {valencia}, Intensidad: {intensidad}")
 
         # 4. INPUT DEL MODELO
         data_modelo = {col: 0 for col in COLUMNAS_MODELO}
 
+        # Biomarcadores
         for col in biomark:
             if col in data_modelo and biomark[col] is not None:
-                data_modelo[col] = biomark[col]
+                try:
+                    data_modelo[col] = float(biomark[col])
+                except:
+                    data_modelo[col] = 0
 
+        # HADS
         data_modelo["ansiedad"] = ansiedad
         data_modelo["depresion"] = depresion
+
+        # Emociones
         data_modelo["valencia_emocional"] = valencia
         data_modelo["intensidad_emocional"] = intensidad
 
         if id_general and 1 <= id_general <= 8:
             data_modelo[f"emocion_general_{id_general}"] = 1
+
         if id_especifica and 1 <= id_especifica <= 16:
             data_modelo[f"emocion_especifica_{id_especifica}"] = 1
 
@@ -762,7 +773,7 @@ def prediccion_usuario(id_usuario):
         cursor.close()
         conn.close()
 
-        print(f"✅ Predicción generada: {int(pred[0])}")
+        print(f"✅ Predicción: {int(pred[0])}")
         
         return jsonify({
             "success": True,
@@ -778,10 +789,8 @@ def prediccion_usuario(id_usuario):
         traceback.print_exc()
         return jsonify({
             "success": False,
-            "error": str(e),
-            "prediccion": 0,
-            "probabilidades": [0.5, 0.5]
-        }), 200
+            "error": str(e)
+        }), 500
 
 # Ruta para verificar todas las rutas disponibles
 @app.route('/routes', methods=['GET'])
