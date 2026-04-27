@@ -646,6 +646,93 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
+
+@app.route('/diagnostico/<int:id_usuario>', methods=['GET'])
+def diagnostico_completo(id_usuario):
+    """Diagnóstico completo para identificar el error"""
+    try:
+        resultado = {
+            "status": "iniciando",
+            "pasos": []
+        }
+        
+        # Paso 1: Verificar conexión a BD
+        try:
+            conn = get_connection()
+            cursor = get_cursor(conn)
+            resultado["pasos"].append({"paso": "Conexión BD", "status": "OK"})
+        except Exception as e:
+            resultado["pasos"].append({"paso": "Conexión BD", "status": "ERROR", "error": str(e)})
+            return jsonify(resultado), 500
+        
+        # Paso 2: Verificar biomarcadores
+        try:
+            cursor.execute("""
+                SELECT * FROM registrobiomark
+                WHERE id_usuario = %s
+                ORDER BY fecha DESC
+                LIMIT 1
+            """, (id_usuario,))
+            biomark = cursor.fetchone()
+            if biomark:
+                resultado["pasos"].append({"paso": "Biomarcadores", "status": "OK", "datos": dict(biomark)})
+            else:
+                resultado["pasos"].append({"paso": "Biomarcadores", "status": "SIN_DATOS"})
+        except Exception as e:
+            resultado["pasos"].append({"paso": "Biomarcadores", "status": "ERROR", "error": str(e)})
+        
+        # Paso 3: Verificar HADS
+        try:
+            cursor.execute("""
+                SELECT id_evaluacion FROM evaluacion
+                WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
+                ORDER BY fecha DESC LIMIT 1
+            """, (id_usuario,))
+            eval_hads = cursor.fetchone()
+            if eval_hads:
+                resultado["pasos"].append({"paso": "Evaluación HADS", "status": "OK", "id": eval_hads['id_evaluacion']})
+            else:
+                resultado["pasos"].append({"paso": "Evaluación HADS", "status": "SIN_DATOS"})
+        except Exception as e:
+            resultado["pasos"].append({"paso": "Evaluación HADS", "status": "ERROR", "error": str(e)})
+        
+        # Paso 4: Verificar emociones
+        try:
+            cursor.execute("""
+                SELECT re.id_emocion_general, re.id_emocion_especifica, re.tipo_registro,
+                       ec.emocion as emocion_general_nombre,
+                       ee.emocion as emocion_especifica_nombre
+                FROM registro_emociones_usuario re
+                LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
+                LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
+                WHERE re.id_usuario = %s
+                ORDER BY re.id_registro DESC LIMIT 1
+            """, (id_usuario,))
+            emocion = cursor.fetchone()
+            if emocion:
+                resultado["pasos"].append({"paso": "Emociones", "status": "OK", "datos": dict(emocion)})
+            else:
+                resultado["pasos"].append({"paso": "Emociones", "status": "SIN_DATOS"})
+        except Exception as e:
+            resultado["pasos"].append({"paso": "Emociones", "status": "ERROR", "error": str(e)})
+        
+        # Paso 5: Verificar modelo
+        try:
+            if modelo is None:
+                resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "ERROR", "error": "Modelo no cargado"})
+            else:
+                resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "OK", "features": modelo.n_features_in_})
+        except Exception as e:
+            resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "ERROR", "error": str(e)})
+        
+        cursor.close()
+        conn.close()
+        
+        resultado["status"] = "completado"
+        return jsonify(resultado)
+        
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 ########## modelo ########
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
