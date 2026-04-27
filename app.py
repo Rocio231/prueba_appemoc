@@ -567,40 +567,60 @@ def prediccion_usuario(id_usuario):
         print(f"DataFrame final: {df.shape}")
         
         # Prediccion
-        pred = modelo.predict(df)
-        proba = modelo.predict_proba(df)
-        
-        # Mapeo de clases
-        clases = ['Leve', 'Moderado', 'Grave']
-        resultado = clases[pred[0]]
-        probabilidad_max = float(proba[0][pred[0]])
-        
-        print(f"Prediccion: {resultado} (clase {pred[0]}) con probabilidad {probabilidad_max:.2%}")
-        
-        nivel_ui = "LEVE" if resultado == "Leve" else "MODERADO" if resultado == "Moderado" else "GRAVE"
-        
-        return jsonify({
-            "success": True,
-            "prediccion": nivel_ui,
-            "nivel_riesgo": nivel_ui,
-            "probabilidad": probabilidad_max,
-            "ansiedad": ansiedad,
-            "depresion": depresion,
-            "emocion_general": nombre_general,
-            "emocion_especifica": nombre_especifica,
-            "tipo_emocion": tipo_registro,
-            "diagnostico": {
-                "ansiedad": {
-                    "puntaje": ansiedad,
-                    "nivel": "Normal" if ansiedad <= 7 else "Leve" if ansiedad <= 10 else "Moderada" if ansiedad <= 14 else "Severa"
-                },
-                "depresion": {
-                    "puntaje": depresion,
-                    "nivel": "Normal" if depresion <= 7 else "Leve" if depresion <= 10 else "Moderada" if depresion <= 14 else "Severa"
-                }
-            }
-        })
-        
+        # PREDICCION
+pred = modelo.predict(df)
+proba = modelo.predict_proba(df)
+
+# Obtener el indice de la clase con mayor probabilidad
+clase_idx = pred[0]
+
+# Obtener la probabilidad de esa clase
+probabilidad_max = float(proba[0][clase_idx])
+
+# Usar las clases reales del modelo
+clases = modelo.classes_  # Esto devuelve ['Grave', 'Leve', 'Moderado'] o el orden que tenga
+
+# Mapeo a los nombres que quieres mostrar en la UI
+mapeo_ui = {
+    'Grave': 'GRAVE',
+    'Moderado': 'MODERADO', 
+    'Leve': 'LEVE'
+}
+
+resultado = clases[clase_idx]
+nivel_ui = mapeo_ui.get(resultado, resultado.upper())
+
+print(f"Clases del modelo: {clases}")
+print(f"Prediccion cruda: {pred}")
+print(f"Probabilidades completas: {proba[0]}")
+print(f"Clase seleccionada: {resultado} con probabilidad {probabilidad_max:.2%}")
+
+return jsonify({
+    "success": True,
+    "prediccion": nivel_ui,
+    "nivel_riesgo": nivel_ui,
+    "probabilidad": probabilidad_max,
+    "probabilidades_completas": {
+        "leve": float(proba[0][0]),
+        "moderado": float(proba[0][1]) if len(proba[0]) > 1 else 0,
+        "grave": float(proba[0][2]) if len(proba[0]) > 2 else 0
+    },
+    "ansiedad": ansiedad,
+    "depresion": depresion,
+    "emocion_general": nombre_general,
+    "emocion_especifica": nombre_especifica,
+    "tipo_emocion": tipo_registro,
+    "diagnostico": {
+        "ansiedad": {
+            "puntaje": ansiedad,
+            "nivel": "Normal" if ansiedad <= 7 else "Leve" if ansiedad <= 10 else "Moderada" if ansiedad <= 14 else "Severa"
+        },
+        "depresion": {
+            "puntaje": depresion,
+            "nivel": "Normal" if depresion <= 7 else "Leve" if depresion <= 10 else "Moderada" if depresion <= 14 else "Severa"
+        }
+    }
+})
     except Exception as e:
         print(f"Error: {str(e)}")
         import traceback
