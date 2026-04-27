@@ -648,115 +648,86 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
 
-@app.route('/diagnostico/<int:id_usuario>', methods=['GET'])
-def diagnostico_completo(id_usuario):
-    """Diagnóstico completo para identificar el error"""
+# LABEL ENCODERS PARA EMOCIONES
+# =========================================
+
+# Valores posibles según tus tablas
+VALORES_EMOCIONES_GENERALES = [
+    "Ninguna", "Éxtasis", "Terror", "Asombro", "Pena", "Odio", "Furia", "Vigilancia", "Admiración"
+]
+
+VALORES_EMOCIONES_ESPECIFICAS = [
+    "Ninguna", "Alegria", "Serenidad", "Confianza", "Aprobación", "Miedo", "Temor", 
+    "Sorpresa", "Distracción", "Tristeza", "Melancolía", "Aversión", "Tedio", 
+    "Ira", "Enfado", "Anticipación", "Interés"
+]
+
+# Crear y entrenar LabelEncoders
+label_encoders = {
+    "Emocion Normal predominante": LabelEncoder().fit(VALORES_EMOCIONES_GENERALES),
+    "Emocion extraordinaria general": LabelEncoder().fit(VALORES_EMOCIONES_GENERALES),
+    "Emocion específica predominante": LabelEncoder().fit(VALORES_EMOCIONES_ESPECIFICAS),
+    "Emocion extraordinaria específica": LabelEncoder().fit(VALORES_EMOCIONES_ESPECIFICAS)
+}
+
+print("✅ LabelEncoders configurados")
+
+# HADS
+PREGUNTAS_ANSIEDAD = [1,3,5,7,9,11,13]
+PREGUNTAS_DEPRESION = [2,4,6,8,10,12,14]
+
+# COLUMNAS DEL MODELO
+COLUMNAS_MODELO = [
+    "steps_mean","steps_std","steps_max","steps_sum",
+    "rr_mean","rr_std","rr_min","rr_max",
+    "heartrate_mean","heartrate_std","heartrate_min","heartrate_max",
+    "vfc_mean","vfc_std","vfc_min","vfc_max",
+    "deepsleeptime_max","shallowsleeptime_max","waketime_max","remtime_max",
+    "Ansiedad","Depresion",
+    "Emocion Normal predominante",
+    "Emocion específica predominante",
+    "Emocion extraordinaria general",
+    "Emocion extraordinaria específica"
+]
+
+# =========================================
+# FUNCIÓN PARA OBTENER NOMBRE DE EMOCIÓN
+# =========================================
+
+def get_emocion_nombre(id_emocion, tipo):
+    """Obtiene el nombre de la emoción desde la BD"""
+    if not id_emocion or id_emocion == 0:
+        return "Ninguna"
+    
     try:
-        resultado = {
-            "status": "iniciando",
-            "pasos": []
-        }
+        conn = get_connection()
+        cursor = get_cursor(conn)
         
-        # Paso 1: Verificar conexión a BD
-        try:
-            conn = get_connection()
-            cursor = get_cursor(conn)
-            resultado["pasos"].append({"paso": "Conexión BD", "status": "OK"})
-        except Exception as e:
-            resultado["pasos"].append({"paso": "Conexión BD", "status": "ERROR", "error": str(e)})
-            return jsonify(resultado), 500
+        if tipo == "general":
+            cursor.execute("SELECT emocion FROM emocionescat WHERE id_emocion = %s", (id_emocion,))
+        else:
+            cursor.execute("SELECT emocion FROM emocion_espe WHERE id_espe = %s", (id_emocion,))
         
-        # Paso 2: Verificar biomarcadores
-        try:
-            cursor.execute("""
-                SELECT * FROM registrobiomark
-                WHERE id_usuario = %s
-                ORDER BY fecha DESC
-                LIMIT 1
-            """, (id_usuario,))
-            biomark = cursor.fetchone()
-            if biomark:
-                resultado["pasos"].append({"paso": "Biomarcadores", "status": "OK", "datos": dict(biomark)})
-            else:
-                resultado["pasos"].append({"paso": "Biomarcadores", "status": "SIN_DATOS"})
-        except Exception as e:
-            resultado["pasos"].append({"paso": "Biomarcadores", "status": "ERROR", "error": str(e)})
-        
-        # Paso 3: Verificar HADS
-        try:
-            cursor.execute("""
-                SELECT id_evaluacion FROM evaluacion
-                WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
-                ORDER BY fecha DESC LIMIT 1
-            """, (id_usuario,))
-            eval_hads = cursor.fetchone()
-            if eval_hads:
-                resultado["pasos"].append({"paso": "Evaluación HADS", "status": "OK", "id": eval_hads['id_evaluacion']})
-            else:
-                resultado["pasos"].append({"paso": "Evaluación HADS", "status": "SIN_DATOS"})
-        except Exception as e:
-            resultado["pasos"].append({"paso": "Evaluación HADS", "status": "ERROR", "error": str(e)})
-        
-        # Paso 4: Verificar emociones
-        try:
-            cursor.execute("""
-                SELECT re.id_emocion_general, re.id_emocion_especifica, re.tipo_registro,
-                       ec.emocion as emocion_general_nombre,
-                       ee.emocion as emocion_especifica_nombre
-                FROM registro_emociones_usuario re
-                LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
-                LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
-                WHERE re.id_usuario = %s
-                ORDER BY re.id_registro DESC LIMIT 1
-            """, (id_usuario,))
-            emocion = cursor.fetchone()
-            if emocion:
-                resultado["pasos"].append({"paso": "Emociones", "status": "OK", "datos": dict(emocion)})
-            else:
-                resultado["pasos"].append({"paso": "Emociones", "status": "SIN_DATOS"})
-        except Exception as e:
-            resultado["pasos"].append({"paso": "Emociones", "status": "ERROR", "error": str(e)})
-        
-        # Paso 5: Verificar modelo
-        try:
-            if modelo is None:
-                resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "ERROR", "error": "Modelo no cargado"})
-            else:
-                resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "OK", "features": modelo.n_features_in_})
-        except Exception as e:
-            resultado["pasos"].append({"paso": "Modelo XGBoost", "status": "ERROR", "error": str(e)})
-        
+        resultado = cursor.fetchone()
         cursor.close()
         conn.close()
         
-        resultado["status"] = "completado"
-        return jsonify(resultado)
-        
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
-########## modelo ########
+        return resultado['emocion'] if resultado else "Ninguna"
+    except:
+        return "Ninguna"
+
+# =========================================
+# ENDPOINT DE PREDICCIÓN
+# =========================================
+
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
-    import traceback
-    
-    print(f"\n🔮 Predicción para usuario: {id_usuario}")
-    
-    resultado = {
-        "success": False,
-        "error": None,
-        "pasos": []
-    }
-    
     try:
         if modelo is None:
-            resultado["error"] = "Modelo no cargado"
-            return jsonify(resultado), 500
-        
-        resultado["pasos"].append("Modelo OK")
+            return jsonify({"success": False, "error": "Modelo no cargado"}), 500
         
         conn = get_connection()
         cursor = get_cursor(conn)
-        resultado["pasos"].append("Conexión BD OK")
         
         # 1. BIOMARCADORES
         cursor.execute("""
@@ -770,10 +741,9 @@ def prediccion_usuario(id_usuario):
         biomark = cursor.fetchone()
         
         if not biomark:
-            resultado["error"] = "No hay biomarcadores"
-            return jsonify(resultado), 404
-        
-        resultado["pasos"].append("Biomarcadores OK")
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "error": "No hay biomarcadores"}), 404
         
         # 2. HADS
         ansiedad = 0
@@ -806,38 +776,36 @@ def prediccion_usuario(id_usuario):
                 elif pregunta in PREGUNTAS_DEPRESION:
                     depresion += puntaje
         
-        resultado["pasos"].append(f"HADS OK (A:{ansiedad}, D:{depresion})")
-        
-        # 3. EMOCIONES (con nombres reales)
+        # 3. EMOCIONES (obtener IDs)
         cursor.execute("""
-            SELECT 
-                re.id_emocion_general,
-                re.id_emocion_especifica,
-                re.tipo_registro,
-                ec.emocion as emocion_general_nombre,
-                ee.emocion as emocion_especifica_nombre
-            FROM registro_emociones_usuario re
-            LEFT JOIN emocionescat ec ON re.id_emocion_general = ec.id_emocion
-            LEFT JOIN emocion_espe ee ON re.id_emocion_especifica = ee.id_espe
-            WHERE re.id_usuario = %s
-            ORDER BY re.id_registro DESC
+            SELECT id_emocion_general, id_emocion_especifica, tipo_registro
+            FROM registro_emociones_usuario
+            WHERE id_usuario = %s
+            ORDER BY id_registro DESC
             LIMIT 1
         """, (id_usuario,))
         
         emocion = cursor.fetchone()
         
-        emocion_general_nombre = "Ninguna"
-        emocion_especifica_nombre = "Ninguna"
+        id_general = 0
+        id_especifica = 0
         tipo_registro = "predominante"
         
         if emocion:
-            emocion_general_nombre = emocion.get('emocion_general_nombre') or "Ninguna"
-            emocion_especifica_nombre = emocion.get('emocion_especifica_nombre') or "Ninguna"
+            id_general = emocion.get('id_emocion_general') or 0
+            id_especifica = emocion.get('id_emocion_especifica') or 0
             tipo_registro = emocion.get('tipo_registro', 'predominante')
         
-        resultado["pasos"].append(f"Emociones OK (G:{emocion_general_nombre}, E:{emocion_especifica_nombre}, T:{tipo_registro})")
+        cursor.close()
+        conn.close()
         
-        # 4. CONSTRUIR INPUT NUMÉRICO
+        # 4. Obtener NOMBRES de las emociones
+        nombre_general = get_emocion_nombre(id_general, "general")
+        nombre_especifica = get_emocion_nombre(id_especifica, "especifica")
+        
+        print(f"📊 Emociones - General: {nombre_general} (ID:{id_general}), Específica: {nombre_especifica} (ID:{id_especifica})")
+        
+        # 5. CONSTRUIR INPUT
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
@@ -863,72 +831,94 @@ def prediccion_usuario(id_usuario):
             "Depresion": depresion
         }
         
-        # Agregar emociones según el tipo
+        # Asignar emociones según tipo (usando NOMBRES)
         if tipo_registro == "predominante":
-            data_modelo["Emocion Normal predominante"] = emocion_general_nombre
-            data_modelo["Emocion específica predominante"] = emocion_especifica_nombre
+            data_modelo["Emocion Normal predominante"] = nombre_general
+            data_modelo["Emocion específica predominante"] = nombre_especifica
             data_modelo["Emocion extraordinaria general"] = "Ninguna"
             data_modelo["Emocion extraordinaria específica"] = "Ninguna"
         else:  # extraordinaria
             data_modelo["Emocion Normal predominante"] = "Ninguna"
             data_modelo["Emocion específica predominante"] = "Ninguna"
-            data_modelo["Emocion extraordinaria general"] = emocion_general_nombre
-            data_modelo["Emocion extraordinaria específica"] = emocion_especifica_nombre
+            data_modelo["Emocion extraordinaria general"] = nombre_general
+            data_modelo["Emocion extraordinaria específica"] = nombre_especifica
         
-        # 5. CONVERTIR EMOCIONES A NÚMEROS
-        emociones_columnas = [
-            "Emocion Normal predominante",
-            "Emocion específica predominante",
-            "Emocion extraordinaria general",
-            "Emocion extraordinaria específica"
-        ]
+        # 6. CONVERTIR NOMBRES A NÚMEROS CON LABELENCODER
+        for col in ["Emocion Normal predominante", "Emocion específica predominante", 
+                    "Emocion extraordinaria general", "Emocion extraordinaria específica"]:
+            valor_texto = data_modelo[col]
+            try:
+                data_modelo[col] = int(label_encoders[col].transform([valor_texto])[0])
+            except:
+                # Si la emoción no está en el encoder, usar "Ninguna" (índice 0)
+                data_modelo[col] = 0
+                print(f"⚠️ Emoción no reconocida: {valor_texto}")
         
-        for col in emociones_columnas:
-            valor = data_modelo[col]
-            if col in label_encoders:
-                try:
-                    # Si el valor ya existe en el encoder
-                    data_modelo[col] = label_encoders[col].transform([valor])[0]
-                except:
-                    # Si no existe, usar 0 (Ninguna)
-                    data_modelo[col] = 0
-        
-        # 6. PREDICCIÓN
+        # 7. PREDICCIÓN
         df = pd.DataFrame([data_modelo])
         
-        # Asegurar que todas las columnas existen
+        # Asegurar todas las columnas
         for col in COLUMNAS_MODELO:
             if col not in df.columns:
                 df[col] = 0
         
-        # Reordenar columnas
         df = df[COLUMNAS_MODELO]
-        
-        # Convertir a tipos numéricos
         df = df.astype(float)
         
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
         
-        cursor.close()
-        conn.close()
-        
-        resultado["success"] = True
-        resultado["prediccion"] = int(pred[0])
-        resultado["probabilidad_sin_riesgo"] = float(proba[0][0])
-        resultado["probabilidad_con_riesgo"] = float(proba[0][1])
-        resultado["ansiedad"] = ansiedad
-        resultado["depresion"] = depresion
-        resultado["emocion_general"] = emocion_general_nombre
-        resultado["emocion_especifica"] = emocion_especifica_nombre
-        resultado["tipo_emocion"] = tipo_registro
-        
-        return jsonify(resultado)
+        return jsonify({
+            "success": True,
+            "prediccion": int(pred[0]),
+            "probabilidad_sin_riesgo": float(proba[0][0]),
+            "probabilidad_con_riesgo": float(proba[0][1]),
+            "ansiedad": ansiedad,
+            "depresion": depresion,
+            "emocion_general": nombre_general,
+            "emocion_especifica": nombre_especifica,
+            "tipo_emocion": tipo_registro,
+            "debug_valores_numericos": {
+                "Emocion Normal predominante": data_modelo["Emocion Normal predominante"],
+                "Emocion específica predominante": data_modelo["Emocion específica predominante"],
+                "Emocion extraordinaria general": data_modelo["Emocion extraordinaria general"],
+                "Emocion extraordinaria específica": data_modelo["Emocion extraordinaria específica"]
+            }
+        })
         
     except Exception as e:
-        resultado["error"] = str(e)
-        resultado["tipo_error"] = type(e).__name__
-        return jsonify(resultado), 500
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# =========================================
+# ENDPOINTS DE PRUEBA
+# =========================================
+
+@app.route('/test', methods=['GET'])
+def test():
+    return jsonify({"status": "ok", "message": "Servidor funcionando"})
+
+@app.route('/estado', methods=['GET'])
+def estado():
+    return jsonify({
+        "success": True,
+        "servidor": "activo",
+        "modelo_cargado": modelo is not None
+    })
+
+@app.route('/emociones_disponibles', methods=['GET'])
+def emociones_disponibles():
+    """Ver qué emociones reconoce el LabelEncoder"""
+    return jsonify({
+        "emociones_generales": VALORES_EMOCIONES_GENERALES,
+        "emociones_especificas": VALORES_EMOCIONES_ESPECIFICAS,
+        "mapeo_normal_predominante": dict(zip(
+            VALORES_EMOCIONES_GENERALES,
+            label_encoders["Emocion Normal predominante"].transform(VALORES_EMOCIONES_GENERALES).tolist()
+        ))
+    })
 ######### MANEJO DE ERRORES #####
 
 @app.errorhandler(404)
