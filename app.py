@@ -4,78 +4,98 @@ from db.BD import get_connection, get_cursor
 import hashlib
 from controlador.c_usuario import UsuarioController
 from controlador.eval_c import EvaluacionController
-from sklearn.preprocessing import LabelEncoder
 from datetime import date, timedelta
 import pandas as pd
 from xgboost import XGBClassifier
 import os
-import sys
 
 app = Flask(__name__)
 CORS(app)
 
-# Configuración para Render
 port = int(os.environ.get('PORT', 5000))
-print(f"🚀 Iniciando servidor en puerto: {port}")
+print(f"Iniciando servidor en puerto: {port}")
 
 # Intentar cargar modelo XGBoost
 try:
     modelo_path = "modelo_xgboost.json"
-    
     if os.path.exists(modelo_path):
         modelo = XGBClassifier()
         modelo.load_model(modelo_path)
-        print("✅ Modelo XGBoost cargado correctamente")
+        print("Modelo XGBoost cargado correctamente")
     else:
-        print(f"⚠️ No se encuentra el modelo en {modelo_path}")
-        print(f"📁 Archivos disponibles: {os.listdir('.')}")
+        print(f"No se encuentra el modelo en {modelo_path}")
         modelo = None
 except Exception as e:
-    print(f"❌ Error cargando XGBoost: {str(e)}")
+    print(f"Error cargando XGBoost: {str(e)}")
     modelo = None
 
 # Definiciones
 PREGUNTAS_ANSIEDAD = [1,3,5,7,9,11,13]
 PREGUNTAS_DEPRESION = [2,4,6,8,10,12,14]
-EMOCIONES_POSITIVAS = [1,2,8]
-EMOCIONES_NEGATIVAS = [3,5,6,7]
 
-# COLUMNAS DEL MODELO
-COLUMNAS_MODELO = [
-    "steps_mean", "steps_std", "steps_max", "steps_sum",
-    "rr_mean", "rr_std", "rr_min", "rr_max",
-    "heartrate_mean", "heartrate_std", "heartrate_min", "heartrate_max",
-    "vfc_mean", "vfc_std", "vfc_min", "vfc_max",
-    "deepsleeptime_max", "shallowsleeptime_max", "waketime_max", "remtime_max",
-    "Ansiedad", "Depresion",
-    "Emocion Normal predominante",
-    "Emocion específica predominante",
-    "Emocion extraordinaria general",
-    "Emocion extraordinaria específica"
+# LISTA COMPLETA DE EMOCIONES PARA ONE-HOT ENCODING
+EMOCIONES_GENERALES = [
+    "Ninguna", "Asombro", "Extasis", "Furia", "Odio", "Pena", "Terror", "Vigilancia", 
+    "Alegria", "Confianza", "Miedo", "Sorpresa", "Tristeza", "Enojo", "Desprecio", "Interes"
 ]
 
-# LABEL ENCODERS PARA EMOCIONES
-VALORES_EMOCIONES_GENERALES = [
-    "Ninguna", "Éxtasis", "Terror", "Asombro", "Pena", "Odio", "Furia", "Vigilancia", "Admiración"
+EMOCIONES_ESPECIFICAS = [
+    "Ninguna", "Anticipacion", "Aprobacion", "Confianza", "Distraccion", "Enfado", "Interes",
+    "Ira", "Melancolia", "Miedo", "Serenidad", "Sorpresa", "Tedio", "Temor", "Tristeza", "Alegria"
 ]
 
-VALORES_EMOCIONES_ESPECIFICAS = [
-    "Ninguna", "Alegria", "Serenidad", "Confianza", "Aprobación", "Miedo", "Temor", 
-    "Sorpresa", "Distracción", "Tristeza", "Melancolía", "Aversión", "Tedio", 
-    "Ira", "Enfado", "Anticipación", "Interés"
-]
+def get_emocion_nombre(id_emocion, tipo):
+    if not id_emocion or id_emocion == 0:
+        return "Ninguna"
+    try:
+        conn = get_connection()
+        cursor = get_cursor(conn)
+        if tipo == "general":
+            cursor.execute("SELECT emocion FROM emocionescat WHERE id_emocion = %s", (id_emocion,))
+        else:
+            cursor.execute("SELECT emocion FROM emocion_espe WHERE id_espe = %s", (id_emocion,))
+        resultado = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return resultado['emocion'] if resultado else "Ninguna"
+    except:
+        return "Ninguna"
 
-# Crear y entrenar LabelEncoders
-label_encoders = {
-    "Emocion Normal predominante": LabelEncoder().fit(VALORES_EMOCIONES_GENERALES),
-    "Emocion extraordinaria general": LabelEncoder().fit(VALORES_EMOCIONES_GENERALES),
-    "Emocion específica predominante": LabelEncoder().fit(VALORES_EMOCIONES_ESPECIFICAS),
-    "Emocion extraordinaria específica": LabelEncoder().fit(VALORES_EMOCIONES_ESPECIFICAS)
-}
+def normalizar_emocion(nombre):
+    """Normaliza nombres de emociones para que coincidan con el modelo"""
+    mapeo = {
+        "Alegría": "Alegria",
+        "Alegria": "Alegria",
+        "Éxtasis": "Extasis",
+        "Extasis": "Extasis",
+        "Terror": "Terror",
+        "Asombro": "Asombro",
+        "Pena": "Pena",
+        "Odio": "Odio",
+        "Furia": "Furia",
+        "Vigilancia": "Vigilancia",
+        "Admiración": "Interes",
+        "Confianza": "Confianza",
+        "Miedo": "Miedo",
+        "Sorpresa": "Sorpresa",
+        "Tristeza": "Tristeza",
+        "Serenidad": "Serenidad",
+        "Temor": "Temor",
+        "Anticipación": "Anticipacion",
+        "Aprobación": "Aprobacion",
+        "Distracción": "Distraccion",
+        "Melancolía": "Melancolia",
+        "Aversión": "Desprecio",
+        "Tedio": "Tedio",
+        "Ira": "Ira",
+        "Enfado": "Enfado",
+        "Interés": "Interes"
+    }
+    return mapeo.get(nombre, nombre if nombre in EMOCIONES_GENERALES else "Ninguna")
 
-print("✅ LabelEncoders configurados")
 
-######## RUTAS DE USUARIO ##########
+######## RUTAS DE USUARIO ######
+
 @app.route('/login', methods=['POST'])
 def login():
     return UsuarioController.login()
@@ -84,7 +104,6 @@ def login():
 def register():
     return UsuarioController.register()
 
-######### RUTAS DE PREGUNTAS ########
 @app.route('/preguntas/hads', methods=['GET'])
 def obtener_preguntas_hads():
     return EvaluacionController.obtener_preguntas_hads()
@@ -93,7 +112,6 @@ def obtener_preguntas_hads():
 def obtener_preguntas_ders():
     return EvaluacionController.obtener_preguntas_ders()
 
-######### RUTAS DE VERIFICACIÓN ########
 @app.route('/verificar/hads', methods=['POST'])
 def verificar_hads():
     return EvaluacionController.verificar_hads()
@@ -102,7 +120,6 @@ def verificar_hads():
 def verificar_ders():
     return EvaluacionController.verificar_ders()
 
-############ RUTAS DE EVALUACIONES ##########
 @app.route('/evaluacion/nueva', methods=['POST'])
 def evaluacion_nueva():
     return EvaluacionController.crear_evaluacion()
@@ -123,7 +140,6 @@ def guardar_respuestas_hads():
 def guardar_respuestas_ders():
     return EvaluacionController.guardar_respuestas()
 
-############## RESULTADOS ##############
 @app.route('/evaluaciones/usuario/<int:id_usuario>', methods=['GET'])
 def obtener_evaluaciones_usuario(id_usuario):
     return EvaluacionController.obtener_evaluaciones_usuario(id_usuario)
@@ -143,7 +159,6 @@ def obtener_detalle_evaluacion(id_evaluacion, tipo):
     else:
         return EvaluacionController.obtener_detalle_ders(id_evaluacion)
 
-########### EMOCIONES ############
 @app.route('/emociones/obtener', methods=['GET'])
 def obtener_emociones():
     return EvaluacionController.obtener_emociones()
@@ -154,13 +169,13 @@ def registrar_emocion():
 
 @app.route('/emociones/test/<int:id_usuario>', methods=['GET'])
 def test_emociones(id_usuario):
-    print(f"🧪 Ruta test_emociones llamada con usuario: {id_usuario}")
+    print(f"Ruta test_emociones llamada con usuario: {id_usuario}")
     return jsonify({
         "success": True,
         "message": f"Ruta funcionando para usuario {id_usuario}",
         "data": [
-            {"emocionGeneral": "Alegría", "emocionEspecifica": "Éxtasis", "tipo": "predominante"},
-            {"emocionGeneral": "Confianza", "emocionEspecifica": "Admiración", "tipo": "predominante"}
+            {"emocionGeneral": "Alegria", "emocionEspecifica": "Extasis", "tipo": "predominante"},
+            {"emocionGeneral": "Confianza", "emocionEspecifica": "Admiracion", "tipo": "predominante"}
         ]
     })
 
@@ -168,13 +183,9 @@ def test_emociones(id_usuario):
 def obtener_registros_emociones_directo(id_usuario):
     try:
         dias = request.args.get('dias', 30, type=int)
-        print(f"📥 Ruta directa - Usuario: {id_usuario}, Días: {dias}")
-        
         fecha_limite = date.today() - timedelta(days=dias)
-        
         conn = get_connection()
         cursor = get_cursor(conn)
-        
         cursor.execute("""
             SELECT 
                 re.id_registro as id,
@@ -190,135 +201,67 @@ def obtener_registros_emociones_directo(id_usuario):
             WHERE re.id_usuario = %s AND re.fecha >= %s
             ORDER BY re.fecha DESC
         """, (id_usuario, fecha_limite))
-        
         registros = cursor.fetchall()
         cursor.close()
         conn.close()
-        
         for registro in registros:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
-        
-        print(f"📊 Encontrados {len(registros)} registros")
-        
-        return jsonify({
-            "success": True,
-            "registros": registros
-        })
-        
+        return jsonify({"success": True, "registros": registros})
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"success": False, "message": str(e)}), 500
 
-##### BIOMARCADORES ESTADÍSTICAS ############
+####### BIOMARCADORES #####
+
+
 @app.route('/guardar_biomarcadores_estadisticas', methods=['POST'])
 def guardar_biomarcadores_estadisticas():
     try:
         data = request.get_json()
-        print(f"📊 Recibiendo biomarcadores: {data}")
-        
         id_usuario = data.get('id_usuario')
         fecha = data.get('fecha')
-        
-        if not id_usuario:
-            return jsonify({'error': 'id_usuario es requerido'}), 400
-        if not fecha:
-            return jsonify({'error': 'fecha es requerida'}), 400
-        
+        if not id_usuario or not fecha:
+            return jsonify({'error': 'id_usuario y fecha son requeridos'}), 400
         conn = get_connection()
         cursor = get_cursor(conn)
-        
         cursor.execute("SELECT id_usuario FROM usuario WHERE id_usuario = %s", (id_usuario,))
-        usuario = cursor.fetchone()
-        
-        if not usuario:
+        if not cursor.fetchone():
             cursor.close()
             conn.close()
             return jsonify({'error': 'Usuario no encontrado'}), 404
-        
         steps_mean = data.get('steps_mean', 0.0)
         steps_std = data.get('steps_std', 0.0)
         steps_max = data.get('steps_max', 0)
         steps_sum = data.get('steps_sum', 0)
-        
         rr_mean = data.get('rr_mean', 0.0)
         rr_std = data.get('rr_std', 0.0)
         rr_min = data.get('rr_min', 0)
         rr_max = data.get('rr_max', 0)
-        
         heartrate_mean = data.get('heartrate_mean', 0.0)
         heartrate_std = data.get('heartrate_std', 0.0)
         heartrate_min = data.get('heartrate_min', 0)
         heartrate_max = data.get('heartrate_max', 0)
-        
         vfc_mean = data.get('vfc_mean', 0.0)
         vfc_std = data.get('vfc_std', 0.0)
         vfc_min = data.get('vfc_min', 0)
         vfc_max = data.get('vfc_max', 0)
-        
         deepsleeptime_max = data.get('deepsleeptime_max', 0.0)
         shallowsleeptime_max = data.get('shallowsleeptime_max', 0.0)
         waketime_max = data.get('waketime_max', 0.0)
         remtime_max = data.get('remtime_max', 0.0)
-        
-        cursor.execute("""
-            SELECT id FROM registrobiomark 
-            WHERE id_usuario = %s AND fecha = %s
-        """, (id_usuario, fecha))
-        
+        cursor.execute("SELECT id FROM registrobiomark WHERE id_usuario = %s AND fecha = %s", (id_usuario, fecha))
         existe = cursor.fetchone()
-        
         if existe:
-            cursor.execute("""
-                UPDATE registrobiomark 
-                SET steps_mean=%s, steps_std=%s, steps_max=%s, steps_sum=%s,
-                    rr_mean=%s, rr_std=%s, rr_min=%s, rr_max=%s,
-                    heartrate_mean=%s, heartrate_std=%s, heartrate_min=%s, heartrate_max=%s,
-                    vfc_mean=%s, vfc_std=%s, vfc_min=%s, vfc_max=%s,
-                    deepsleeptime_max=%s, shallowsleeptime_max=%s, waketime_max=%s, remtime_max=%s,
-                    created_at=CURRENT_TIMESTAMP
-                WHERE id_usuario=%s AND fecha=%s
-            """, (
-                steps_mean, steps_std, steps_max, steps_sum,
-                rr_mean, rr_std, rr_min, rr_max,
-                heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
-                vfc_mean, vfc_std, vfc_min, vfc_max,
-                deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max,
-                id_usuario, fecha
-            ))
+            cursor.execute("""UPDATE registrobiomark SET steps_mean=%s, steps_std=%s, steps_max=%s, steps_sum=%s, rr_mean=%s, rr_std=%s, rr_min=%s, rr_max=%s, heartrate_mean=%s, heartrate_std=%s, heartrate_min=%s, heartrate_max=%s, vfc_mean=%s, vfc_std=%s, vfc_min=%s, vfc_max=%s, deepsleeptime_max=%s, shallowsleeptime_max=%s, waketime_max=%s, remtime_max=%s, created_at=CURRENT_TIMESTAMP WHERE id_usuario=%s AND fecha=%s""", (steps_mean, steps_std, steps_max, steps_sum, rr_mean, rr_std, rr_min, rr_max, heartrate_mean, heartrate_std, heartrate_min, heartrate_max, vfc_mean, vfc_std, vfc_min, vfc_max, deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max, id_usuario, fecha))
             mensaje = "Biomarcadores actualizados correctamente"
         else:
-            cursor.execute("""
-                INSERT INTO registrobiomark (
-                    id_usuario, fecha,
-                    steps_mean, steps_std, steps_max, steps_sum,
-                    rr_mean, rr_std, rr_min, rr_max,
-                    heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
-                    vfc_mean, vfc_std, vfc_min, vfc_max,
-                    deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                id_usuario, fecha,
-                steps_mean, steps_std, steps_max, steps_sum,
-                rr_mean, rr_std, rr_min, rr_max,
-                heartrate_mean, heartrate_std, heartrate_min, heartrate_max,
-                vfc_mean, vfc_std, vfc_min, vfc_max,
-                deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max
-            ))
+            cursor.execute("""INSERT INTO registrobiomark (id_usuario, fecha, steps_mean, steps_std, steps_max, steps_sum, rr_mean, rr_std, rr_min, rr_max, heartrate_mean, heartrate_std, heartrate_min, heartrate_max, vfc_mean, vfc_std, vfc_min, vfc_max, deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""", (id_usuario, fecha, steps_mean, steps_std, steps_max, steps_sum, rr_mean, rr_std, rr_min, rr_max, heartrate_mean, heartrate_std, heartrate_min, heartrate_max, vfc_mean, vfc_std, vfc_min, vfc_max, deepsleeptime_max, shallowsleeptime_max, waketime_max, remtime_max))
             mensaje = "Biomarcadores guardados correctamente"
-        
         conn.commit()
         cursor.close()
         conn.close()
-        
         return jsonify({'mensaje': mensaje, 'success': True}), 200
-        
     except Exception as e:
-        print(f"❌ Error al guardar biomarcadores: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/obtener_biomarcadores_estadisticas/<int:id_usuario>', methods=['GET'])
@@ -326,43 +269,22 @@ def obtener_biomarcadores_estadisticas(id_usuario):
     try:
         fecha = request.args.get('fecha')
         dias = request.args.get('dias', 30, type=int)
-        
         conn = get_connection()
         cursor = get_cursor(conn)
-        
         if fecha:
-            cursor.execute("""
-                SELECT * FROM registrobiomark 
-                WHERE id_usuario = %s AND fecha = %s
-                ORDER BY fecha DESC
-            """, (id_usuario, fecha))
+            cursor.execute("SELECT * FROM registrobiomark WHERE id_usuario = %s AND fecha = %s ORDER BY fecha DESC", (id_usuario, fecha))
         else:
-            cursor.execute("""
-                SELECT * FROM registrobiomark 
-                WHERE id_usuario = %s 
-                ORDER BY fecha DESC
-                LIMIT %s
-            """, (id_usuario, dias))
-        
+            cursor.execute("SELECT * FROM registrobiomark WHERE id_usuario = %s ORDER BY fecha DESC LIMIT %s", (id_usuario, dias))
         registros = cursor.fetchall()
-        
         for registro in registros:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
             if registro.get('created_at'):
                 registro['created_at'] = str(registro['created_at'])
-        
         cursor.close()
         conn.close()
-        
-        return jsonify({
-            'success': True,
-            'registros': registros,
-            'total': len(registros)
-        }), 200
-        
+        return jsonify({'success': True, 'registros': registros, 'total': len(registros)}), 200
     except Exception as e:
-        print(f"❌ Error al obtener estadísticas: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/biomarcador_estadisticas_ultimo/<int:id_usuario>', methods=['GET'])
@@ -370,18 +292,10 @@ def obtener_ultimas_estadisticas_biomarcador(id_usuario):
     try:
         conn = get_connection()
         cursor = get_cursor(conn)
-        
-        cursor.execute("""
-            SELECT * FROM registrobiomark 
-            WHERE id_usuario = %s 
-            ORDER BY fecha DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT * FROM registrobiomark WHERE id_usuario = %s ORDER BY fecha DESC LIMIT 1", (id_usuario,))
         registro = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         if registro:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
@@ -390,33 +304,18 @@ def obtener_ultimas_estadisticas_biomarcador(id_usuario):
             return jsonify({'success': True, 'registro': registro}), 200
         else:
             return jsonify({'success': True, 'registro': None, 'message': 'No hay registros'}), 200
-        
     except Exception as e:
-        print(f"Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
 
 @app.route('/tendencias_ders/<int:id_usuario>', methods=['GET'])
 def obtener_tendencias_ders(id_usuario):
-    """Obtiene los puntajes DERS de los últimos 7 días"""
     try:
         conn = get_connection()
         cursor = get_cursor(conn)
-        
-        # Obtener últimos 7 días de evaluaciones DERS
-        cursor.execute("""
-            SELECT fecha, puntaje_total
-            FROM evaluacion
-            WHERE id_usuario = %s AND tipo_evaluacion = 'DERS'
-            ORDER BY fecha DESC
-            LIMIT 7
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT fecha, puntaje_total FROM evaluacion WHERE id_usuario = %s AND tipo_evaluacion = 'DERS' ORDER BY fecha DESC LIMIT 7", (id_usuario,))
         resultados = cursor.fetchall()
         cursor.close()
         conn.close()
-        
-        # Determinar el nivel
         tendencias = []
         for r in resultados:
             puntaje = r['puntaje_total']
@@ -426,143 +325,65 @@ def obtener_tendencias_ders(id_usuario):
                 nivel = "moderado"
             else:
                 nivel = "leve"
-            
-            tendencias.append({
-                "fecha": str(r['fecha']),
-                "puntaje": puntaje,
-                "nivel": nivel
-            })
-        
-        return jsonify({
-            "success": True,
-            "tendencias": tendencias
-        })
-        
+            tendencias.append({"fecha": str(r['fecha']), "puntaje": puntaje, "nivel": nivel})
+        return jsonify({"success": True, "tendencias": tendencias})
     except Exception as e:
-        print(f" Error: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
-        
+
 @app.route('/resumen_estadisticas_usuario/<int:id_usuario>', methods=['GET'])
 def resumen_estadisticas_usuario(id_usuario):
     try:
         conn = get_connection()
         cursor = get_cursor(conn)
-        
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_registros,
-                MIN(fecha) as primera_fecha,
-                MAX(fecha) as ultima_fecha,
-                AVG(steps_mean) as promedio_steps_mean,
-                AVG(steps_sum) as promedio_steps_diarios,
-                MAX(steps_max) as max_steps_diarios,
-                AVG(heartrate_mean) as promedio_heartrate,
-                MIN(heartrate_min) as min_heartrate,
-                MAX(heartrate_max) as max_heartrate,
-                AVG(vfc_mean) as promedio_vfc,
-                AVG(deepsleeptime_max) as promedio_sueno_profundo,
-                AVG(shallowsleeptime_max) as promedio_sueno_ligero,
-                AVG(remtime_max) as promedio_sueno_rem
-            FROM registrobiomark 
-            WHERE id_usuario = %s
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT COUNT(*) as total_registros, MIN(fecha) as primera_fecha, MAX(fecha) as ultima_fecha, AVG(steps_mean) as promedio_steps_mean, AVG(steps_sum) as promedio_steps_diarios, MAX(steps_max) as max_steps_diarios, AVG(heartrate_mean) as promedio_heartrate, MIN(heartrate_min) as min_heartrate, MAX(heartrate_max) as max_heartrate, AVG(vfc_mean) as promedio_vfc, AVG(deepsleeptime_max) as promedio_sueno_profundo, AVG(shallowsleeptime_max) as promedio_sueno_ligero, AVG(remtime_max) as promedio_sueno_rem FROM registrobiomark WHERE id_usuario = %s", (id_usuario,))
         resumen = cursor.fetchone()
-        
-        cursor.execute("""
-            SELECT 
-                fecha,
-                steps_sum,
-                heartrate_mean,
-                vfc_mean,
-                deepsleeptime_max + shallowsleeptime_max + remtime_max as total_sueno
-            FROM registrobiomark 
-            WHERE id_usuario = %s 
-            ORDER BY fecha DESC
-            LIMIT 7
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT fecha, steps_sum, heartrate_mean, vfc_mean, deepsleeptime_max + shallowsleeptime_max + remtime_max as total_sueno FROM registrobiomark WHERE id_usuario = %s ORDER BY fecha DESC LIMIT 7", (id_usuario,))
         tendencias = cursor.fetchall()
-        
         if resumen and resumen.get('primera_fecha'):
             resumen['primera_fecha'] = str(resumen['primera_fecha'])
         if resumen and resumen.get('ultima_fecha'):
             resumen['ultima_fecha'] = str(resumen['ultima_fecha'])
-        
         for tendencia in tendencias:
             if tendencia.get('fecha'):
                 tendencia['fecha'] = str(tendencia['fecha'])
-        
         cursor.close()
         conn.close()
-        
-        return jsonify({
-            'success': True,
-            'resumen': resumen,
-            'tendencias_7dias': tendencias
-        }), 200
-        
+        return jsonify({'success': True, 'resumen': resumen, 'tendencias_7dias': tendencias}), 200
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-###### BIOMARCADORES LEGACY #######
 @app.route('/guardar_biomarcadores', methods=['POST'])
 def guardar_biomarcadores_legacy():
     try:
         data = request.get_json()
-        print(f"Recibiendo biomarcadores (legacy): {data}")
-        
         id_usuario = data.get('id_usuario')
         fecha = data.get('fecha')
         pasos = data.get('pasos', 0)
         ritmo_cardiaco = data.get('ritmo_cardiaco')
         sueno_minutos = data.get('sueno_minutos', 0)
         hrv_ms = data.get('hrv_ms', 0.0)
-        
         if not id_usuario or not fecha:
             return jsonify({'error': 'id_usuario y fecha son requeridos'}), 400
-        
         conn = get_connection()
         cursor = get_cursor(conn)
-        
         cursor.execute("SELECT id_usuario FROM usuario WHERE id_usuario = %s", (id_usuario,))
         if not cursor.fetchone():
             cursor.close()
             conn.close()
             return jsonify({'error': 'Usuario no encontrado'}), 404
-        
-        cursor.execute("""
-            SELECT id FROM biomarcadores_diarios 
-            WHERE id_usuario = %s AND fecha = %s
-        """, (id_usuario, fecha))
-        
+        cursor.execute("SELECT id FROM biomarcadores_diarios WHERE id_usuario = %s AND fecha = %s", (id_usuario, fecha))
         existe = cursor.fetchone()
-        
         if existe:
-            cursor.execute("""
-                UPDATE biomarcadores_diarios 
-                SET pasos=%s, ritmo_cardiaco=%s, sueno_minutos=%s, hrv_ms=%s, updated_at=CURRENT_TIMESTAMP
-                WHERE id_usuario=%s AND fecha=%s
-            """, (pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, id_usuario, fecha))
+            cursor.execute("UPDATE biomarcadores_diarios SET pasos=%s, ritmo_cardiaco=%s, sueno_minutos=%s, hrv_ms=%s, updated_at=CURRENT_TIMESTAMP WHERE id_usuario=%s AND fecha=%s", (pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, id_usuario, fecha))
             mensaje = "Biomarcadores actualizados correctamente"
         else:
-            cursor.execute("""
-                INSERT INTO biomarcadores_diarios (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms))
+            cursor.execute("INSERT INTO biomarcadores_diarios (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms) VALUES (%s, %s, %s, %s, %s, %s)", (id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms))
             mensaje = "Biomarcadores guardados correctamente"
-        
         conn.commit()
         cursor.close()
         conn.close()
-        
         return jsonify({'mensaje': mensaje, 'success': True}), 200
-        
     except Exception as e:
-        print(f" Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/obtener_biomarcadores/<int:id_usuario>', methods=['GET'])
@@ -570,41 +391,22 @@ def obtener_biomarcadores_legacy(id_usuario):
     try:
         fecha = request.args.get('fecha')
         dias = request.args.get('dias', 30, type=int)
-        
         conn = get_connection()
         cursor = get_cursor(conn)
-        
         if fecha:
-            cursor.execute("""
-                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
-                FROM biomarcadores_diarios 
-                WHERE id_usuario = %s AND fecha = %s
-                ORDER BY fecha DESC
-            """, (id_usuario, fecha))
+            cursor.execute("SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at FROM biomarcadores_diarios WHERE id_usuario = %s AND fecha = %s ORDER BY fecha DESC", (id_usuario, fecha))
         else:
-            cursor.execute("""
-                SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
-                FROM biomarcadores_diarios 
-                WHERE id_usuario = %s 
-                ORDER BY fecha DESC
-                LIMIT %s
-            """, (id_usuario, dias))
-        
+            cursor.execute("SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at FROM biomarcadores_diarios WHERE id_usuario = %s ORDER BY fecha DESC LIMIT %s", (id_usuario, dias))
         registros = cursor.fetchall()
-        
         for registro in registros:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
             if registro.get('created_at'):
                 registro['created_at'] = str(registro['created_at'])
-        
         cursor.close()
         conn.close()
-        
         return jsonify({'success': True, 'biomarcadores': registros, 'total': len(registros)}), 200
-        
     except Exception as e:
-        print(f" Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/biomarcador_ultimo/<int:id_usuario>', methods=['GET'])
@@ -612,19 +414,10 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
     try:
         conn = get_connection()
         cursor = get_cursor(conn)
-        
-        cursor.execute("""
-            SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at
-            FROM biomarcadores_diarios 
-            WHERE id_usuario = %s 
-            ORDER BY fecha DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT id, id_usuario, fecha, pasos, ritmo_cardiaco, sueno_minutos, hrv_ms, created_at FROM biomarcadores_diarios WHERE id_usuario = %s ORDER BY fecha DESC LIMIT 1", (id_usuario,))
         registro = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         if registro:
             if registro.get('fecha'):
                 registro['fecha'] = str(registro['fecha'])
@@ -633,36 +426,10 @@ def obtener_ultimo_biomarcador_legacy(id_usuario):
             return jsonify({'success': True, 'biomarcador': registro}), 200
         else:
             return jsonify({'success': True, 'biomarcador': None, 'message': 'No hay registros'}), 200
-        
     except Exception as e:
-        print(f" Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# FUNCIÓN PARA OBTENER NOMBRE DE EMOCIÓN
-
-def get_emocion_nombre(id_emocion, tipo):
-    if not id_emocion or id_emocion == 0:
-        return "Ninguna"
-    
-    try:
-        conn = get_connection()
-        cursor = get_cursor(conn)
-        
-        if tipo == "general":
-            cursor.execute("SELECT emocion FROM emocionescat WHERE id_emocion = %s", (id_emocion,))
-        else:
-            cursor.execute("SELECT emocion FROM emocion_espe WHERE id_espe = %s", (id_emocion,))
-        
-        resultado = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        return resultado['emocion'] if resultado else "Ninguna"
-    except:
-        return "Ninguna"
-
-#predicción
-
+#### PREDICCION CORREGIDA ####
 
 @app.route('/prediccion/<int:id_usuario>', methods=['GET'])
 def prediccion_usuario(id_usuario):
@@ -674,14 +441,7 @@ def prediccion_usuario(id_usuario):
         cursor = get_cursor(conn)
         
         # BIOMARCADORES
-        cursor.execute("""
-            SELECT *
-            FROM registrobiomark
-            WHERE id_usuario = %s
-            ORDER BY fecha DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT * FROM registrobiomark WHERE id_usuario = %s ORDER BY fecha DESC LIMIT 1", (id_usuario,))
         biomark = cursor.fetchone()
         
         if not biomark:
@@ -692,26 +452,12 @@ def prediccion_usuario(id_usuario):
         # HADS
         ansiedad = 0
         depresion = 0
-        
-        cursor.execute("""
-            SELECT id_evaluacion
-            FROM evaluacion
-            WHERE id_usuario = %s AND tipo_evaluacion = 'HADS'
-            ORDER BY fecha DESC, id_evaluacion DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT id_evaluacion FROM evaluacion WHERE id_usuario = %s AND tipo_evaluacion = 'HADS' ORDER BY fecha DESC, id_evaluacion DESC LIMIT 1", (id_usuario,))
         eval_hads = cursor.fetchone()
         
         if eval_hads:
-            cursor.execute("""
-                SELECT id_pregunta, puntaje
-                FROM respuestas_usuario_hads
-                WHERE id_evaluacion = %s
-            """, (eval_hads['id_evaluacion'],))
-            
+            cursor.execute("SELECT id_pregunta, puntaje FROM respuestas_usuario_hads WHERE id_evaluacion = %s", (eval_hads['id_evaluacion'],))
             respuestas = cursor.fetchall()
-            
             for r in respuestas:
                 pregunta = r['id_pregunta']
                 puntaje = r['puntaje']
@@ -721,14 +467,7 @@ def prediccion_usuario(id_usuario):
                     depresion += puntaje
         
         # EMOCIONES
-        cursor.execute("""
-            SELECT id_emocion_general, id_emocion_especifica, tipo_registro
-            FROM registro_emociones_usuario
-            WHERE id_usuario = %s
-            ORDER BY id_registro DESC
-            LIMIT 1
-        """, (id_usuario,))
-        
+        cursor.execute("SELECT id_emocion_general, id_emocion_especifica, tipo_registro FROM registro_emociones_usuario WHERE id_usuario = %s ORDER BY id_registro DESC LIMIT 1", (id_usuario,))
         emocion = cursor.fetchone()
         
         id_general = 0
@@ -743,13 +482,13 @@ def prediccion_usuario(id_usuario):
         cursor.close()
         conn.close()
         
-        # Obtener NOMBRES de emociones
-        nombre_general = get_emocion_nombre(id_general, "general")
-        nombre_especifica = get_emocion_nombre(id_especifica, "especifica")
+        # Obtener y normalizar nombres de emociones
+        nombre_general = normalizar_emocion(get_emocion_nombre(id_general, "general"))
+        nombre_especifica = normalizar_emocion(get_emocion_nombre(id_especifica, "especifica"))
         
-        print(f"📊 Emociones - General: {nombre_general}, Específica: {nombre_especifica}, Tipo: {tipo_registro}")
+        print(f"Emociones - General: {nombre_general}, Especifica: {nombre_especifica}, Tipo: {tipo_registro}")
         
-        # CONSTRUIR INPUT - VALORES NUMÉRICOS BÁSICOS
+        # Construir diccionario con One-Hot Encoding para emociones
         data_modelo = {
             "steps_mean": float(biomark.get('steps_mean', 0)),
             "steps_std": float(biomark.get('steps_std', 0)),
@@ -775,89 +514,69 @@ def prediccion_usuario(id_usuario):
             "Depresion": depresion
         }
         
-        # LISTA COMPLETA DE EMOCIONES POSIBLES (One-Hot Encoding)
-        emociones_generales = ["Asombro", "Éxtasis", "Furia", "Odio", "Pena", "Terror", "Vigilancia", "Alegría", "Confianza", "Miedo", "Sorpresa", "Tristeza"]
-        emociones_especificas = [
-            "Anticipación", "Aprobación", "Confianza", "Distracción", "Enfado", "Interés",
-            "Ira", "Melancolía", "Miedo", "Serenidad", "Sorpresa", "Tedio", "Temor", "Tristeza", "Alegría"
-        ]
-        
         # Inicializar todas las columnas de emociones en 0
-        for emocion_general in emociones_generales:
+        for emocion_general in EMOCIONES_GENERALES:
             data_modelo[f"Emocion Normal predominante_{emocion_general}"] = 0
             data_modelo[f"Emocion extraordinaria general_{emocion_general}"] = 0
         
-        for emocion_especifica in emociones_especificas:
-            data_modelo[f"Emocion específica predominante_{emocion_especifica}"] = 0
-            data_modelo[f"Emocion extraordinaria específica_{emocion_especifica}"] = 0
+        for emocion_especifica in EMOCIONES_ESPECIFICAS:
+            data_modelo[f"Emocion especifica predominante_{emocion_especifica}"] = 0
+            data_modelo[f"Emocion extraordinaria especifica_{emocion_especifica}"] = 0
         
-        # Activar las emociones según el tipo de registro
+        # Activar las emociones segun el tipo de registro
         if tipo_registro == "predominante" or tipo_registro == "normal":
-            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+            if nombre_general != "Ninguna" and nombre_general in EMOCIONES_GENERALES:
                 col_name = f"Emocion Normal predominante_{nombre_general}"
                 if col_name in data_modelo:
                     data_modelo[col_name] = 1
-                    print(f"✅ Activada: {col_name}")
+                    print(f"Activada: {col_name}")
             
-            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
-                col_name = f"Emocion específica predominante_{nombre_especifica}"
+            if nombre_especifica != "Ninguna" and nombre_especifica in EMOCIONES_ESPECIFICAS:
+                col_name = f"Emocion especifica predominante_{nombre_especifica}"
                 if col_name in data_modelo:
                     data_modelo[col_name] = 1
-                    print(f"✅ Activada: {col_name}")
+                    print(f"Activada: {col_name}")
         else:  # extraordinaria
-            if nombre_general != "Ninguna" and nombre_general in emociones_generales:
+            if nombre_general != "Ninguna" and nombre_general in EMOCIONES_GENERALES:
                 col_name = f"Emocion extraordinaria general_{nombre_general}"
                 if col_name in data_modelo:
                     data_modelo[col_name] = 1
-                    print(f"✅ Activada: {col_name}")
+                    print(f"Activada: {col_name}")
             
-            if nombre_especifica != "Ninguna" and nombre_especifica in emociones_especificas:
-                col_name = f"Emocion extraordinaria específica_{nombre_especifica}"
+            if nombre_especifica != "Ninguna" and nombre_especifica in EMOCIONES_ESPECIFICAS:
+                col_name = f"Emocion extraordinaria especifica_{nombre_especifica}"
                 if col_name in data_modelo:
                     data_modelo[col_name] = 1
-                    print(f"✅ Activada: {col_name}")
+                    print(f"Activada: {col_name}")
         
         # Crear DataFrame
         df = pd.DataFrame([data_modelo])
         
         # Obtener las columnas que espera el modelo
         expected_columns = modelo.feature_names_in_
-        print(f"📊 Columnas esperadas por el modelo: {len(expected_columns)}")
-        print(f"📊 Columnas generadas: {len(df.columns)}")
         
-        # Verificar columnas faltantes
-        missing_cols = set(expected_columns) - set(df.columns)
-        if missing_cols:
-            print(f"⚠️ Columnas faltantes: {list(missing_cols)[:5]}...")
-            for col in missing_cols:
+        # Agregar columnas faltantes
+        for col in expected_columns:
+            if col not in df.columns:
                 df[col] = 0
         
-        # Verificar columnas extra
-        extra_cols = set(df.columns) - set(expected_columns)
-        if extra_cols:
-            print(f"⚠️ Columnas extra: {list(extra_cols)[:5]}...")
-            df = df[expected_columns]
-        
-        # Asegurar el orden correcto
+        # Reordenar columnas
         df = df[expected_columns]
         df = df.astype(float)
         
-        print(f"📊 DataFrame final: {df.shape}")
+        print(f"DataFrame final: {df.shape}")
         
-        # PREDICCIÓN
+        # Prediccion
         pred = modelo.predict(df)
         proba = modelo.predict_proba(df)
         
-        # MAPEO DE CLASES (ajusta según tu modelo)
+        # Mapeo de clases
         clases = ['Leve', 'Moderado', 'Grave']
-        
-        # Obtener resultado
         resultado = clases[pred[0]]
         probabilidad_max = float(proba[0][pred[0]])
         
-        print(f"🎯 Predicción: {resultado} (clase {pred[0]}) con probabilidad {probabilidad_max:.2%}")
+        print(f"Prediccion: {resultado} (clase {pred[0]}) con probabilidad {probabilidad_max:.2%}")
         
-        # Mapeo para la UI
         nivel_ui = "LEVE" if resultado == "Leve" else "MODERADO" if resultado == "Moderado" else "GRAVE"
         
         return jsonify({
@@ -883,35 +602,25 @@ def prediccion_usuario(id_usuario):
         })
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
-       
+
+
+#Test
+
 @app.route('/test', methods=['GET'])
 def test():
     return jsonify({"status": "ok", "message": "Servidor funcionando"}), 200
 
 @app.route('/estado', methods=['GET'])
 def estado():
-    return jsonify({
-        "success": True,
-        "servidor": "activo",
-        "modelo_cargado": modelo is not None
-    })
+    return jsonify({"success": True, "servidor": "activo", "modelo_cargado": modelo is not None})
 
-@app.route('/emociones_disponibles', methods=['GET'])
-def emociones_disponibles():
-    return jsonify({
-        "emociones_generales": VALORES_EMOCIONES_GENERALES,
-        "emociones_especificas": VALORES_EMOCIONES_ESPECIFICAS,
-        "mapeo_normal_predominante": dict(zip(
-            VALORES_EMOCIONES_GENERALES,
-            label_encoders["Emocion Normal predominante"].transform(VALORES_EMOCIONES_GENERALES).tolist()
-        ))
-    })
+## MANEJO DE ERRORES
 
-######### MANEJO DE ERRORES #####
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({"success": False, "message": "Ruta no encontrada"}), 404
@@ -922,42 +631,8 @@ def internal_error(error):
 
 if __name__ == '__main__':
     is_production = os.getenv('RENDER', False)
-    
     if is_production:
         app.run(host='0.0.0.0', port=port)
     else:
-        print("\n" + "="*50)
-        print("🚀 SERVIDOR MVC INICIADO")
-        print("="*50)
-        print(f"📡 Escuchando en: http://0.0.0.0:{port}")
-        print("🔧 Modo: Debug")
-        print("\n📋 ENDPOINTS DISPONIBLES:")
-        print("   POST /login")
-        print("   POST /register")
-        print("   GET  /preguntas/hads")
-        print("   GET  /preguntas/ders")
-        print("   POST /verificar/hads")
-        print("   POST /verificar/ders")
-        print("   POST /evaluacion/nueva")
-        print("   POST /evaluacion/ders/nueva")
-        print("   POST /evaluacion/guardar")
-        print("   GET  /evaluaciones/usuario/<id>")
-        print("   GET  /evaluacion/hads/<id>")
-        print("   GET  /evaluacion/ders/<id>")
-        print("   GET  /evaluacion/<id>/<tipo>")
-        print("   GET  /emociones/obtener")
-        print("   POST /emociones/registrar")
-        print("   GET  /emociones/registros/<id>")
-        print("   POST /guardar_biomarcadores_estadisticas")
-        print("   GET  /obtener_biomarcadores_estadisticas/<id>")
-        print("   GET  /biomarcador_estadisticas_ultimo/<id>")
-        print("   GET  /resumen_estadisticas_usuario/<id>")
-        print("   POST /guardar_biomarcadores")
-        print("   GET  /obtener_biomarcadores/<id>")
-        print("   GET  /biomarcador_ultimo/<id>")
-        print("   GET  /prediccion/<id>")
-        print("   GET  /test")
-        print("   GET  /estado")
-        print("   GET  /emociones_disponibles")
-        print("="*50 + "\n")
+        print("Servidor iniciado en modo desarrollo")
         app.run(host='0.0.0.0', port=port, debug=True)
